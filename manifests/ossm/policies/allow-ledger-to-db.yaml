@@ -1,0 +1,14 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: restrict-egress-to-db
+  namespace: intermesh-backend
+spec:
+  action: DENY
+  rules:
+  - to:
+    - operation:
+        hosts: ["intermesh-db.cluster-ch1qf4av9pcz.eu-central-1.rds.amazonaws.com"] 
+    from:
+    - source:
+        notPrincipals: ["cluster.local/ns/intermesh-backend/sa/intermesh-ledger-sa"]

@@ -1,0 +1,30 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: fraud-analytics-chaos
+  namespace: intermesh-backend
+spec:
+  hosts:
+  - fraud-analytics.intermesh-backend.svc.cluster.local
+  http:
+  - name: "unauthenticated-block-route"
+    match:
+      - withoutHeaders:
+          x-intermesh-route-class: {}
+    fault:
+      abort:
+        percentage:
+          value: 100.0
+        httpStatus: 503   
+    route:
+    - destination:
+        host: fraud-analytics.intermesh-backend.svc.cluster.local
+        port:
+          number: 80
+  - name: "standard-route"
+    route:
+    - destination:
+        host: fraud-analytics.intermesh-backend.svc.cluster.local
+        port:
+          number: 80
+    timeout: 3s

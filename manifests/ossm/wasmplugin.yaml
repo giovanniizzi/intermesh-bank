@@ -1,0 +1,12 @@
+apiVersion: extensions.istio.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: security-headers-wasmplugin
+  namespace: intermesh-backend 
+spec:
+  imagePullPolicy: Always
+  selector:
+    matchLabels:
+      app: intermesh-orchestrator
+  url: oci://quay.io/rhn-support-gizzi/security-headers-wasmplugin:1.0
+  failStrategy: FAIL_OPEN

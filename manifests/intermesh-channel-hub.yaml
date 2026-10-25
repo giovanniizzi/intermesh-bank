@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intermesh-channel-hub
+  namespace: intermesh-backend
+  labels:
+    app: intermesh-channel-hub
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: intermesh-channel-hub
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: intermesh-channel-hub
+        version: v1
+    spec:
+      serviceAccountName: intermesh-channel-hub-sa
+      containers:
+      - name: channel-hub
+        image: quay.io/rhn-support-gizzi/intermesh-channel-hub:1.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: ORCHESTRATOR_URL
+          value: "http://intermesh-orchestrator.intermesh-backend.svc.cluster.local"
+        - name: KEYCLOAK_ISSUER
+          value: "https://sso.apps.cluster-l974n.dynamic.redhatworkshops.io/realms/intermesh-bank"
+        - name: KEYCLOAK_CLIENT_ID
+          value: "intermesh-frontend"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: intermesh-channel-hub
+  namespace: intermesh-backend
+  labels:
+    app: intermesh-channel-hub
+spec:
+  ports:
+  - name: http
+    port: 80           
+    targetPort: 8080   
+  selector:
+    app: intermesh-channel-hub

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: intermesh-channel-hub-sa
+  namespace: intermesh-backend
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: intermesh-orchestrator-sa
+  namespace: intermesh-backend
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: intermesh-ledger-sa
+  namespace: intermesh-backend
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fraud-analytics-sa
+  namespace: intermesh-backend

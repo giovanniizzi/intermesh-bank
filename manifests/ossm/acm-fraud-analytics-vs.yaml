@@ -1,0 +1,68 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: istio-fraud-analytics-chaos
+  namespace: open-cluster-management-policies
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: config-policy-fraud-analytics-chaos
+        spec:
+          remediationAction: enforce
+          namespaceSelector:
+            include:
+              - intermesh-backend
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.istio.io/v1beta1
+                kind: VirtualService
+                metadata:
+                  name: fraud-analytics-chaos
+                  namespace: intermesh-backend
+                spec:
+                  hosts:
+                  - fraud-analytics.intermesh-backend.svc.cluster.local
+                  http:
+                  - name: "unauthenticated-block-route"
+                    match:
+                      - withoutHeaders:
+                          x-intermesh-route-class:
+                            exact: "Authenticated"
+                    fault:
+                      abort:
+                        percentage:
+                          value: 100.0
+                        httpStatus: 503   
+                    route:
+                    - destination:
+                        host: fraud-analytics.intermesh-backend.svc.cluster.local
+                        port:
+                          number: 80
+                  - name: "standard-route"
+                    route:
+                    - destination:
+                        host: fraud-analytics.intermesh-backend.svc.cluster.local
+                        port:
+                          number: 80
+                    timeout: 3s
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-fraud-analytics-chaos
+  namespace: open-cluster-management-policies
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: istio-fraud-analytics-chaos
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-all-clusters

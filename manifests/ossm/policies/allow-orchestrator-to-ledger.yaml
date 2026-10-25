@@ -1,0 +1,16 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: orchestrator-to-ledger
+  namespace: intermesh-backend
+spec:
+  selector:
+    matchLabels:
+      app: intermesh-ledger
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: 
+          - "cluster.local/ns/intermesh-backend/sa/intermesh-orchestrator-sa"
+          - "cluster.local/ns/istio-east-west/sa/istio-eastwestgateway-service-account"

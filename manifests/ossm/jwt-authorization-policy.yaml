@@ -1,0 +1,14 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: require-jwt-policy
+  namespace: intermesh-backend
+spec:
+  selector:
+    matchLabels:
+      app: intermesh-orchestrator
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        requestPrincipals: ["https://sso.apps.cluster-l974n.dynamic.redhatworkshops.io/realms/intermesh-bank/*"]

@@ -1,0 +1,35 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-to-frontend
+  namespace: intermesh-frontend
+spec:
+  selector:
+    matchLabels:
+      app: intermesh-ui
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces: ["istio-ingress", "istio-east-west"]
+        #principals:
+          #- "cluster.local/ns/istio-ingress/sa/default"
+          #- "cluster.local/ns/istio-east-west/sa/istio-eastwestgateway-service-account"
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-to-intermesh-channel-hub
+  namespace: intermesh-backend
+spec:
+  selector:
+    matchLabels:
+      app: intermesh-channel-hub
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces: ["istio-ingress", "istio-east-west"]
+        #principals: 
+          #- "cluster.local/ns/istio-ingress/sa/default"
+          #- "cluster.local/ns/istio-east-west/sa/istio-eastwestgateway-service-account"

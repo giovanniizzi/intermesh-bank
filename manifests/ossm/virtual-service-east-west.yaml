@@ -1,0 +1,44 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: east-west-routing-mesh
+  namespace: istio-east-west
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - east-west-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api
+    route:
+    - destination:
+        host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
+        port:
+          number: 80
+  - match:
+    - uri:
+        prefix: /v2/fraud
+    route:
+    - destination:
+        host: fraud-analytics.intermesh-backend.svc.cluster.local
+        port:
+          number: 80
+  - match:
+    - uri:
+        prefix: /v1/ledger
+    route:
+    - destination:
+        host: intermesh-ledger.intermesh-backend.svc.cluster.local
+        port:
+          number: 80
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: intermesh-ui.intermesh-frontend.svc.cluster.local
+        port:
+          number: 80
+    

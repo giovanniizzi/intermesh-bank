@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-analytics
+  namespace: intermesh-backend
+  labels:
+    app: fraud-analytics
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-analytics
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: fraud-analytics
+        version: v1
+    spec:
+      serviceAccountName: fraud-analytics-sa
+      containers:
+      - name: fraud-analytics
+        image: quay.io/rhn-support-gizzi/fraud-analytics:1.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-analytics
+  namespace: intermesh-backend
+  labels:
+    app: fraud-analytics
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: fraud-analytics

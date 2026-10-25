@@ -1,0 +1,35 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /app
+
+COPY go.mod ./
+COPY go.sum ./
+
+RUN go mod download
+
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+# - CGO_ENABLED=0 ensures the binary is completely static and has no dynamic dependencies
+# - GOOS=linux targets the Linux kernel layout
+# - -ldflags="-s -w" strips debugging symbols to minimize binary footprint
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o intermesh-ledger \
+    ./cmd/ledger/main.go
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+LABEL maintainer="Giovanni Luca Izzi <gizzi@redhat.com>"
+LABEL application="intermesh-ledger"
+LABEL tier="core-banking"
+
+WORKDIR /deployments
+
+COPY --from=builder /app/intermesh-ledger .
+
+EXPOSE 8080
+
+USER 1001
+
+CMD ["./intermesh-ledger"]

@@ -1,0 +1,21 @@
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: intermesh-ui-se
+  namespace: intermesh-frontend
+spec:
+  hosts:
+    - intermesh-ui.intermesh-frontend.svc.cluster.local
+  location: MESH_INTERNAL
+  ports:
+    - name: http
+      number: 80
+      protocol: HTTP
+      targetPort: 8080
+  resolution: DNS
+  subjectAltNames:
+    - 'spiffe://cluster.local/ns/intermesh-frontend/sa/intermesh-ui-sa'
+    - 'spiffe://cluster.local/ns/istio-east-west/sa/istio-eastwestgateway-service-account'
+  workloadSelector:
+    labels:
+      app: intermesh-ui

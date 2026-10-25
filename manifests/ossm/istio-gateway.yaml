@@ -1,0 +1,102 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: istio-gateway
+  namespace: open-cluster-management-policies
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: config-policy-istio-cross-gateway
+        spec:
+
+          remediationAction: enforce
+          namespaceSelector:
+            exclude:
+              - kube-*
+              - openshift-*
+              - default
+            include:
+              - istio-east-west
+              - istio-ingress
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.istio.io/v1alpha3
+                kind: Gateway
+                metadata:
+                  name: east-west-gateway
+                  namespace: istio-east-west
+                spec:
+                  selector:
+                    istio: eastwestgateway
+                  servers:
+                    - port:
+                        number: 15443
+                        name: https-tls
+                        protocol: HTTPS
+                      tls:
+                        mode: ISTIO_MUTUAL
+                      hosts:
+                        - "*"
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: networking.istio.io/v1beta1
+                kind: Gateway
+                metadata:
+                  name: ingress-gateway
+                  namespace: istio-ingress
+                spec:
+                  selector:
+                    istio: ingressgateway
+                  servers:
+                    - port:
+                        number: 80
+                        name: http
+                        protocol: HTTP
+                      hosts:
+                        - "*"
+                    - hosts:
+                        - '*'
+                      port:
+                        name: https
+                        number: 443
+                        protocol: HTTPS
+                      tls:
+                        mode: OPTIONAL_MUTUAL
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: placement-all-clusters
+  namespace: open-cluster-management-policies
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            ossm-enabled: "true"
+      tolerations:
+        - key: cluster.open-cluster-management.io/unavailable
+          operator: Exists
+        - key: cluster.open-cluster-management.io/unreachable
+          operator: Exists
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-istio-cross-gateway
+  namespace: open-cluster-management-policies
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: istio-gateway
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-all-clusters

@@ -1,0 +1,21 @@
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: fraud-analytics-se
+  namespace: intermesh-backend
+spec:
+  hosts:
+    - fraud-analytics.intermesh-backend.svc.cluster.local
+  location: MESH_INTERNAL
+  ports:
+    - name: http
+      number: 80
+      protocol: HTTP
+      targetPort: 8080
+  resolution: DNS
+  subjectAltNames:
+    - 'spiffe://cluster.local/ns/intermesh-backend/sa/fraud-analytics-sa'
+    - 'spiffe://cluster.local/ns/istio-east-west/sa/istio-eastwestgateway-service-account'
+  workloadSelector:
+    labels:
+      app: fraud-analytics

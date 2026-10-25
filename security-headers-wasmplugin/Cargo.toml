@@ -1,0 +1,11 @@
+[package]
+name = "security-headers-wasmplugin"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+proxy-wasm = "0.2.1" # Versione stabile dell'SDK di Envoy
+log = "0.4"

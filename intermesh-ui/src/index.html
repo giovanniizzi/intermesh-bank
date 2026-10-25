@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InterMesh Core Banking Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script type="module" src="js/app.js"></script>
+</head>
+<body>
+
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo-area">
+                <span class="logo-icon">🌐</span>
+                <span class="logo-text">InterMesh<span>Bank</span></span>
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active">📊 Dashboard</a>
+                <a href="#" class="nav-item">💸 Payments</a>
+                <a href="#" class="nav-item">👤 Account Setup</a>
+            </nav>
+            <div class="sidebar-footer">
+                <span class="status-badge connected">Online</span>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="page-title">
+                    <h1>Enterprise Operations Control</h1>
+                    <p class="subtitle">Real-time transactional monitoring panel</p>
+                </div>
+                <div class="user-profile">
+                    <div class="avatar">--</div>
+                    <div class="user-info">
+                        <span class="user-name">Loading Profile...</span>
+                        <span class="user-role">Verifying Context</span>
+                    </div>
+                    <button id="logoutBtn" class="logout-button" title="Sign Out from InterMesh">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                            Logout
+                    </button>
+                </div>
+            </header>
+
+            <div class="dashboard-grid">
+                
+                <section class="card action-card">
+                    <div class="card-header">
+                        <span class="card-icon">👤</span>
+                        <h2>Customer Onboarding</h2>
+                    </div>
+                    <form id="onboardingForm" class="corporate-form">
+                        <div class="form-group">
+                            <label for="holderName">Account Holder Name</label>
+                            <input type="text" id="holderName" placeholder="e.g. Mario Rossi" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="initialDeposit">Initial Deposit (€)</label>
+                            <input type="number" id="initialDeposit" value="1000.00" step="0.01" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="btnOnboard">Provision Account</button>
+                    </form>
+                    <div id="onboardingTarget" class="account-badge hidden"></div>
+                </section>
+
+                <section class="card action-card">
+                    <div class="card-header">
+                        <span class="card-icon">💸</span>
+                        <h2>Initiate Wire Transfer</h2>
+                    </div>
+                    <form id="transferForm" class="corporate-form">
+                        <div class="form-group">
+                            <label for="sourceAccount">Source Account Number</label>
+                            <input type="text" id="sourceAccount" placeholder="Click 'Provision' or type ID" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="targetAccount">Target IBAN (Receiver)</label>
+                            <input type="text" id="targetAccount" placeholder="e.g. DE880306905..." required>
+                        </div>
+                        <div class="form-group">
+                            <label for="transferAmount">Amount (€)</label>
+                            <input type="number" id="transferAmount" placeholder="0.00" step="0.01" required>
+                        </div>
+                        <button type="submit" class="btn btn-success" id="btnTransfer">Execute Atomic Transfer</button>
+                    </form>
+                </section>
+
+                <section class="card table-card">
+                    <div class="card-header">
+                        <span class="card-icon">📜</span>
+                        <h2>Core Ledger Audit Trail (Live PostgreSQL History)</h2>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="corporate-table">
+                            <thead>
+                                <tr>
+                                    <th>Transaction ID</th>
+                                    <th>Counterparty IBAN</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                    <th>Timestamp</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyTableBody">
+                                <tr>
+                                    <td colspan="5" class="empty-state">No active account loaded. Provision a customer to fetch database ledger.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <div id="notificationToast" class="toast hidden"></div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

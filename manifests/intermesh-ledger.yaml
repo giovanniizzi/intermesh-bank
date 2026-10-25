@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intermesh-ledger
+  namespace: intermesh-backend
+  labels:
+    app: intermesh-ledger
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: intermesh-ledger
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: intermesh-ledger
+        version: v1
+    spec:
+      serviceAccountName: intermesh-ledger-sa
+      containers:
+      - name: ledger
+        image: quay.io/rhn-support-gizzi/intermesh-ledger:1.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: DATABASE_URL
+          value: "postgres://postgres:5RRRpCgJZgAXqYovQOgZ@intermesh-db.cluster-ch1qf4av9pcz.eu-central-1.rds.amazonaws.com:5432/postgres?sslmode=require&options=-c%20search_path%3Dintermesh_ledger"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: intermesh-ledger
+  namespace: intermesh-backend
+  labels:
+    app: intermesh-ledger
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: intermesh-ledger

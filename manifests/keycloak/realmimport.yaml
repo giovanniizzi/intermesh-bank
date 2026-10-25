@@ -1,0 +1,95 @@
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: KeycloakRealmImport
+metadata:
+  name: intermesh-bank-realm-import
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  realm:
+    id: intermesh-bank
+    realm: intermesh-bank
+    enabled: true
+    duplicateEmailsAllowed: false
+    displayName: "InterMesh Corporate Banking"
+    sslRequired: external
+    groups:
+      - name: admins
+      - name: users
+    roles:
+      realm:
+        - description: Default user role
+          name: user
+        - description: Administrator role
+          name: admin
+    loginWithEmailAllowed: true
+    clients:
+      - clientId: intermesh-frontend
+        enabled: true
+        protocol: openid-connect
+        publicClient: true
+        bearerOnly: false
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: true
+        #rootUrl: "*"
+        #baseUrl: "/"
+        redirectUris:
+          - "*"
+        webOrigins:
+          - "*"
+      - clientId: intermesh-channel-hub
+        enabled: true
+        protocol: openid-connect
+        publicClient: false
+        bearerOnly: false
+        standardFlowEnabled: false
+        serviceAccountsEnabled: true 
+        secret: "InterMeshHubSecureSecret2026Keycloak"
+    users:
+      - username: mario.rossi
+        enabled: true
+        firstName: Mario
+        lastName: Rossi
+        email: mario.rossi@intermesh.it
+        emailVerified: true
+        credentials:
+          - type: password
+            value: password2026
+            temporary: false
+        realmRoles:
+          - user
+      - username: giovanni.izzi
+        enabled: true
+        firstName: Giovanni Luca
+        lastName: Izzi
+        email: giovanni.izzi@intermesh.it
+        emailVerified: true
+        credentials:
+          - type: password
+            value: password2026
+            temporary: false
+        realmRoles:
+          - user
+      - username: john.doe
+        enabled: true
+        firstName: John
+        lastName: Doe
+        email: john.doe@intermesh.it
+        emailVerified: true
+        credentials:
+          - type: password
+            value: password2026
+            temporary: false
+        realmRoles:
+          - user
+      - credentials:
+          - temporary: false
+            type: password
+            value: ycAzTYoKpL
+        email: admin@demo.redhat.com
+        emailVerified: true
+        enabled: true
+        firstName: Admin
+        lastName: Demo
+        realmRoles:
+          - admin
+        username: admin
