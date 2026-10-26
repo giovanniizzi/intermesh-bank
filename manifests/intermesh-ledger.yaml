@@ -30,7 +30,10 @@ spec:
         - name: PORT
           value: "8080"
         - name: DATABASE_URL
-          value: "postgres://postgres:5RRRpCgJZgAXqYovQOgZ@intermesh-db.cluster-ch1qf4av9pcz.eu-central-1.rds.amazonaws.com:5432/postgres?sslmode=require&options=-c%20search_path%3Dintermesh_ledger"
+          valueFrom:
+            secretKeyRef:
+              name: intermesh-ledger-db
+              key: DATABASE_URL
         resources:
           limits:
             cpu: "500m"

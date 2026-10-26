@@ -1,7 +1,9 @@
 package config
 
 import (
+	"log"
 	"os"
+	"strings"
 )
 
 // Config holds all the centralized environment configurations for the Ledger microservice
@@ -10,12 +12,11 @@ type Config struct {
 	Port        string
 }
 
-// LoadConfig reads the environment variables or injects secure fallback defaults
+// LoadConfig reads environment variables and exits if DATABASE_URL is missing.
 func LoadConfig() *Config {
 	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		// Secure default fallback for local development environments
-		dbURL = "postgres://postgres:password@localhost:5432/intermesh?sslmode=disable"
+	if strings.TrimSpace(dbURL) == "" {
+		log.Fatal("configuration error: DATABASE_URL is required")
 	}
 
 	port := os.Getenv("PORT")
