@@ -1,1 +1,52 @@
 /security-headers-wasmplugin/target
+
+# Local configuration and environment files
+/.local/
+.env
+.env.*
+*.env
+*.env.*
+*.local.yaml
+*.local.yml
+*.local.json
+*.local.properties
+
+# Local cloud, registry and credential files
+.aws/
+.docker/
+.kube/
+.secrets/
+credentials
+credentials.*
+.credentials
+.credentials.*
+*.credentials
+*.credentials.*
+*.secret.yaml
+*.secret.yml
+*.secret.json
+
+# Kubernetes client configuration
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# Private keys and keystores (PEM files may also contain private keys)
+id_rsa
+id_rsa.*
+id_dsa
+id_dsa.*
+id_ecdsa
+id_ecdsa.*
+id_ed25519
+id_ed25519.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Sanitized examples belong outside ignored directories
+!*.example
+!*.example.*
