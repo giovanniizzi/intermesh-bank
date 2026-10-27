@@ -5,6 +5,27 @@ metadata:
   namespace: keycloak
 spec:
   keycloakCRName: keycloak
+  placeholders:
+    HUB_CLIENT_SECRET:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: HUB_CLIENT_SECRET
+    DEMO_USER_1_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_USER_1_PASSWORD
+    DEMO_USER_2_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_USER_2_PASSWORD
+    DEMO_USER_3_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_USER_3_PASSWORD
+    DEMO_ADMIN_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_ADMIN_PASSWORD
   realm:
     id: intermesh-bank
     realm: intermesh-bank
@@ -43,7 +64,7 @@ spec:
         bearerOnly: false
         standardFlowEnabled: false
         serviceAccountsEnabled: true 
-        secret: "InterMeshHubSecureSecret2026Keycloak"
+        secret: "${HUB_CLIENT_SECRET}"
     users:
       - username: mario.rossi
         enabled: true
@@ -53,7 +74,7 @@ spec:
         emailVerified: true
         credentials:
           - type: password
-            value: password2026
+            value: "${DEMO_USER_1_PASSWORD}"
             temporary: false
         realmRoles:
           - user
@@ -65,7 +86,7 @@ spec:
         emailVerified: true
         credentials:
           - type: password
-            value: password2026
+            value: "${DEMO_USER_2_PASSWORD}"
             temporary: false
         realmRoles:
           - user
@@ -77,14 +98,14 @@ spec:
         emailVerified: true
         credentials:
           - type: password
-            value: password2026
+            value: "${DEMO_USER_3_PASSWORD}"
             temporary: false
         realmRoles:
           - user
       - credentials:
           - temporary: false
             type: password
-            value: ycAzTYoKpL
+            value: "${DEMO_ADMIN_PASSWORD}"
         email: admin@demo.redhat.com
         emailVerified: true
         enabled: true
