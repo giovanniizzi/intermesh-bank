@@ -268,10 +268,12 @@ on the Hub separately.
 
 OSSM3 installation and configuration are managed manually in each managed
 cluster. The repository contains application and policy resources, but not a
-complete cluster provisioning workflow. The Kustomize entrypoints compose
-existing resources without changing endpoints or images. Environment-specific
-overrides and ACM automation for mesh installation and application deployment
-remain future work.
+complete cluster provisioning workflow. Public application images and the
+WasmPlugin OCI URL use non-deployable placeholders. Configure actual published
+images through ignored private overlays as described in the
+[local image configuration examples](../manifests/examples/README.md).
+Environment-specific endpoint overrides and ACM automation for mesh installation
+and application deployment remain future work.
 
 A deployment also needs environment-specific configuration for:
 
