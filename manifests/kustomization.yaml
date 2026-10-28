@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Shared managed-cluster base; select a network-specific overlay to render.
+resources:
+  - namespaces.yaml
+  - intermesh-frontend-sa.yaml
+  - intermesh-backend-sa.yaml
+  - intermesh-ui.yaml
+  - intermesh-orchestrator.yaml
+  - intermesh-ledger.yaml
+  - fraud-analytics.yaml
+  - ossm/virtual-service.yaml
+  - ossm/virtual-service-east-west.yaml
+  - ossm/jwt-request-authentication.yaml
+  - ossm/jwt-authorization-policy.yaml
+  - ossm/policies/allow-hub-to-orchestrator.yaml
+  - ossm/policies/allow-ingress-to-ui-api.yaml
+  - ossm/policies/allow-orchestrator-to-ledger.yaml
+  - ossm/policies/allow-orchestrator-to-analytics.yaml
+  - ossm/policies/allow-ledger-to-db.yaml
+  - ossm/serviceentry/intermesh-ui-se.yaml
+  - ossm/serviceentry/intermesh-orchestrator-se.yaml
+  - ossm/serviceentry/intermesh-ledger-se.yaml
+  - ossm/serviceentry/fraud-analytics-se.yaml
+  - ossm/serviceentry/serviceentry-db.yaml
+  - ossm/serviceentry/serviceentry-keycloak.yaml
+  - ossm/wasmplugin.yaml

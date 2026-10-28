@@ -204,8 +204,8 @@ Each managed cluster uses exactly one Orchestrator DestinationRule:
 
 | Cluster | DestinationRule | Affinity cookie |
 | --- | --- | --- |
-| Cluster 1 / `network1` | [orchestrator-network1-dr.yaml](../manifests/ossm/destination-rules/orchestrator-network1-dr.yaml): `intermesh-orchestrator-dr-network1` | `network1.session`, TTL `0s` |
-| Cluster 2 / `network2` | [orchestrator-network2-dr.yaml](../manifests/ossm/destination-rules/orchestrator-network2-dr.yaml): `intermesh-orchestrator-dr-network2` | `network2.session`, TTL `0s` |
+| Cluster 1 / `network1` | [orchestrator-network1-dr.yaml](../manifests/ossm/destination-rules/network1/orchestrator-network1-dr.yaml): `intermesh-orchestrator-dr-network1` | `network1.session`, TTL `0s` |
+| Cluster 2 / `network2` | [orchestrator-network2-dr.yaml](../manifests/ossm/destination-rules/network2/orchestrator-network2-dr.yaml): `intermesh-orchestrator-dr-network2` | `network2.session`, TTL `0s` |
 
 Both target `intermesh-orchestrator.intermesh-backend.svc.cluster.local` in
 `intermesh-backend`. They do not select themselves by network, so deploying both
@@ -235,12 +235,43 @@ Use the existing [image packaging](../security-headers-wasmplugin/Containerfile)
 when publishing the artifact. Registry relocation requires updating the
 WasmPlugin's `spec.url`; a workload image override does not update that field.
 
+## Local Kustomize rendering
+
+Render each target independently from the repository root:
+
+```sh
+# ACM Hub governance
+oc kustomize manifests/ossm
+# ACM Hub Keycloak provisioning
+oc kustomize manifests/keycloak
+# Managed Cluster 1 / network1
+oc kustomize overlays/managed-cluster-1
+# Managed Cluster 2 / network2
+oc kustomize overlays/managed-cluster-2
+```
+
+`kubectl kustomize` can be used in place of `oc kustomize`. These commands render
+local manifests without contacting a cluster or deploying resources.
+The managed-cluster overlays combine the shared base in
+[manifests/kustomization.yaml](../manifests/kustomization.yaml) with exactly one
+network-specific DestinationRule. The Hub governance and Keycloak entrypoints
+are independent of that base.
+
+The renderings exclude Secret examples, the inactive Channel Hub Deployment,
+Service and ServiceEntry, and the standalone Fraud Analytics VirtualService.
+Existing inactive Channel Hub service-account and authorization-policy objects
+remain in shared source files; they do not activate a workload. Provision the
+database Secrets in both managed clusters and the Keycloak credential Secret
+on the Hub separately.
+
 ## Deployment prerequisites
 
 OSSM3 installation and configuration are managed manually in each managed
 cluster. The repository contains application and policy resources, but not a
-complete cluster provisioning workflow. Reusable overlays and ACM automation
-for mesh installation and application deployment remain future work.
+complete cluster provisioning workflow. The Kustomize entrypoints compose
+existing resources without changing endpoints or images. Environment-specific
+overrides and ACM automation for mesh installation and application deployment
+remain future work.
 
 A deployment also needs environment-specific configuration for:
 
