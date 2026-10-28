@@ -1,6 +1,7 @@
 # Copy to .local/managed-cluster-1/kustomization.yaml.
 # For Cluster 2, change the resources entry to ../../overlays/managed-cluster-2.
 # Replace all local-test.invalid references with actual published images.
+# Replace postgres-local.example.invalid with the shared PostgreSQL hostname.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -32,3 +33,23 @@ patches:
       - op: replace
         path: /spec/url
         value: oci://local-test.invalid/security-headers-wasmplugin:1.0
+  - target:
+      group: networking.istio.io
+      version: v1alpha3
+      kind: ServiceEntry
+      name: intermesh-external-db
+      namespace: intermesh-backend
+    patch: |-
+      - op: replace
+        path: /spec/hosts/0
+        value: postgres-local.example.invalid
+  - target:
+      group: security.istio.io
+      version: v1beta1
+      kind: AuthorizationPolicy
+      name: restrict-egress-to-db
+      namespace: intermesh-backend
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/to/0/operation/hosts/0
+        value: postgres-local.example.invalid

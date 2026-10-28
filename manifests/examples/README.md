@@ -22,7 +22,8 @@ Current-source cleanup and Git history remediation remain separate tasks.
 Shared Deployments use symbolic image names. Public managed-cluster overlays
 render `example.invalid` image references, which are deliberately non-deployable.
 
-Copy [local-images.kustomization.example.yaml](local-images.kustomization.example.yaml)
+For a new local overlay, copy
+[local-images.kustomization.example.yaml](local-images.kustomization.example.yaml)
 to `.local/managed-cluster-1/kustomization.yaml` and
 `.local/managed-cluster-2/kustomization.yaml`. In the second copy, change the
 `resources` entry to `../../overlays/managed-cluster-2`.
@@ -60,9 +61,28 @@ Preserve the shared endpoint, database name, credentials, TLS settings and all
 connection options, including any schema/search-path options, when moving an
 existing connection string into the Secret. The Ledger passes `DATABASE_URL`
 through unchanged and exits with a configuration error if it is missing or blank.
-There is no built-in database connection fallback. The database hostname must
-also agree with the mesh configuration; changing mesh endpoints is a separate
-cleanup step.
+There is no built-in database connection fallback.
+
+The public PostgreSQL ServiceEntry and existing database AuthorizationPolicy use
+`postgres.example.invalid`. The local-overlay example overrides both fields with
+the deliberately nonfunctional `postgres-local.example.invalid`. For existing
+local overlays, append only the two PostgreSQL patches from the example,
+preserving current image overrides and the WasmPlugin patch.
+
+Replace the test hostname with the same actual PostgreSQL DNS hostname in both
+local overlays. The hostname in the separately provisioned `DATABASE_URL` Secret
+must agree with the ServiceEntry hostname and the policy's hostname field.
+Keep the complete connection string in the Secret, not in Kustomize patches.
+
+### Unresolved security issue: PG-EGRESS-01
+
+**PostgreSQL egress enforcement must be reviewed and resolved before deployment.**
+The existing [database AuthorizationPolicy](../ossm/policies/allow-ledger-to-db.yaml)
+is not a PostgreSQL outbound allowlist: `operation.hosts` is HTTP-specific, and
+the namespace-wide DENY policy has no port restriction and may affect unrelated
+TCP traffic. Neither the ServiceEntry nor this policy establishes a PostgreSQL
+egress security boundary. These hostname overrides preserve the existing policy
+semantics; they do not improve egress enforcement.
 
 ### Create the Secret without putting credentials in command arguments
 

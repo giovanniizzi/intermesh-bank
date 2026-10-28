@@ -5,7 +5,7 @@ metadata:
   namespace: intermesh-backend
 spec:
   hosts:
-  - intermesh-db.cluster-ch1qf4av9pcz.eu-central-1.rds.amazonaws.com
+  - postgres.example.invalid
   ports:
   - number: 5432
     name: tcp-postgres
