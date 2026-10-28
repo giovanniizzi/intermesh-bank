@@ -1,0 +1,34 @@
+# Copy to .local/managed-cluster-1/kustomization.yaml.
+# For Cluster 2, change the resources entry to ../../overlays/managed-cluster-2.
+# Replace all local-test.invalid references with actual published images.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../overlays/managed-cluster-1
+
+images:
+  - name: example.invalid/intermesh-orchestrator
+    newName: local-test.invalid/intermesh-orchestrator
+    newTag: "1.0"
+  - name: example.invalid/intermesh-ui
+    newName: local-test.invalid/intermesh-ui
+    newTag: "1.0"
+  - name: example.invalid/intermesh-ledger
+    newName: local-test.invalid/intermesh-ledger
+    newTag: "1.0"
+  - name: example.invalid/fraud-analytics
+    newName: local-test.invalid/fraud-analytics
+    newTag: "1.0"
+
+patches:
+  - target:
+      group: extensions.istio.io
+      version: v1alpha1
+      kind: WasmPlugin
+      name: security-headers-wasmplugin
+      namespace: intermesh-backend
+    patch: |-
+      - op: replace
+        path: /spec/url
+        value: oci://local-test.invalid/security-headers-wasmplugin:1.0

@@ -8,5 +8,5 @@ spec:
   selector:
     matchLabels:
       app: intermesh-orchestrator
-  url: oci://quay.io/rhn-support-gizzi/security-headers-wasmplugin:1.0
+  url: oci://example.invalid/security-headers-wasmplugin:1.0
   failStrategy: FAIL_OPEN

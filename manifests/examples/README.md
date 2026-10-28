@@ -17,6 +17,33 @@ The ignore rules are safeguards against accidental additions. They do not affect
 already tracked files, encrypt local files or configure an application or cluster.
 Current-source cleanup and Git history remediation remain separate tasks.
 
+## Local image configuration
+
+Shared Deployments use symbolic image names. Public managed-cluster overlays
+render `example.invalid` image references, which are deliberately non-deployable.
+
+Copy [local-images.kustomization.example.yaml](local-images.kustomization.example.yaml)
+to `.local/managed-cluster-1/kustomization.yaml` and
+`.local/managed-cluster-2/kustomization.yaml`. In the second copy, change the
+`resources` entry to `../../overlays/managed-cluster-2`.
+The `.local/` directory is Git-ignored.
+
+Replace each `local-test.invalid` image name and tag with an actual published
+image before deployment. Keep the `images.name` entries matched to the public
+`example.invalid` names. The example contains no registry credentials and is
+nonfunctional until configured.
+
+WasmPlugin uses an OCI URL in `spec.url`, separate from Kubernetes container
+images. Update the example's targeted URL patch to the intended published plugin,
+preserving `oci://`; the normal `images` entries do not override this field.
+
+Render the private overlays from the repository root:
+
+```sh
+oc kustomize .local/managed-cluster-1
+oc kustomize .local/managed-cluster-2
+```
+
 ## Shared PostgreSQL database
 
 All Ledger workloads across the OpenShift clusters use one shared external

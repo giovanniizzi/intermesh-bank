@@ -21,7 +21,7 @@ spec:
       serviceAccountName: intermesh-ui-sa
       containers:
       - name: web-frontend
-        image: quay.io/rhn-support-gizzi/intermesh-ui:1.0
+        image: intermesh-ui:1.0
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

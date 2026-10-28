@@ -21,7 +21,7 @@ spec:
       serviceAccountName: fraud-analytics-sa
       containers:
       - name: fraud-analytics
-        image: quay.io/rhn-support-gizzi/fraud-analytics:1.0
+        image: fraud-analytics:1.0
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

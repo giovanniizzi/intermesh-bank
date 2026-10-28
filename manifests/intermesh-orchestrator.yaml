@@ -21,7 +21,7 @@ spec:
       serviceAccountName: intermesh-orchestrator-sa
       containers:
       - name: orchestrator
-        image: quay.io/rhn-support-gizzi/intermesh-orchestrator:1.0
+        image: intermesh-orchestrator:1.0
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

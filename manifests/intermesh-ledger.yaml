@@ -21,7 +21,7 @@ spec:
       serviceAccountName: intermesh-ledger-sa
       containers:
       - name: ledger
-        image: quay.io/rhn-support-gizzi/intermesh-ledger:1.0
+        image: intermesh-ledger:1.0
         imagePullPolicy: Always
         ports:
         - containerPort: 8080

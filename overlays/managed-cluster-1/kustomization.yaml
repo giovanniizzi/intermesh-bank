@@ -5,6 +5,20 @@ resources:
   - ../../manifests
   - ../../manifests/ossm/destination-rules/network1
 
+images:
+  - name: intermesh-orchestrator
+    newName: example.invalid/intermesh-orchestrator
+    newTag: "1.0"
+  - name: intermesh-ui
+    newName: example.invalid/intermesh-ui
+    newTag: "1.0"
+  - name: intermesh-ledger
+    newName: example.invalid/intermesh-ledger
+    newTag: "1.0"
+  - name: fraud-analytics
+    newName: example.invalid/fraud-analytics
+    newTag: "1.0"
+
 patches:
   - patch: |-
       apiVersion: apps/v1
