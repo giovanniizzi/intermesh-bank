@@ -4,3 +4,19 @@ kind: Kustomization
 resources:
   - ../../manifests
   - ../../manifests/ossm/destination-rules/network2
+
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: intermesh-orchestrator
+        namespace: intermesh-backend
+      spec:
+        template:
+          spec:
+            containers:
+              - name: orchestrator
+                env:
+                  - name: NETWORK
+                    value: network2
