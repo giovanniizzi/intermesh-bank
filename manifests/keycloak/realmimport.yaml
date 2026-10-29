@@ -54,9 +54,13 @@ spec:
         #rootUrl: "*"
         #baseUrl: "/"
         redirectUris:
-          - "*"
+          - "https://bank-network1.example.invalid/*"
+          - "https://bank-network2.example.invalid/*"
         webOrigins:
-          - "*"
+          - "https://bank-network1.example.invalid"
+          - "https://bank-network2.example.invalid"
+        attributes:
+          post.logout.redirect.uris: "https://bank-network1.example.invalid##https://bank-network2.example.invalid"
       - clientId: intermesh-channel-hub
         enabled: true
         protocol: openid-connect

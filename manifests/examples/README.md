@@ -64,16 +64,38 @@ clusters:
 
 Replace the test hostname consistently in all five fields before deployment.
 Realm `intermesh-bank` and public client `intermesh-frontend` stay unchanged.
-Browser redirect URI and Web Origin configuration will be handled separately.
+Browser redirect, Web Origin and logout allowlists use the Hub provisioning
+overlay below.
 These patches do not provision Keycloak or change realm credentials.
 
 ## Hub Keycloak provisioning overlay
 
 Copy [hub-keycloak.kustomization.example.yaml](hub-keycloak.kustomization.example.yaml)
 to `.local/hub-keycloak/kustomization.yaml`. This Git-ignored overlay references
-the public Keycloak base and renders its RealmImport unchanged, with no patches.
+the public Keycloak base and patches only the frontend client's three allowlists.
 The Keycloak CR and credential Secret remain separate prerequisites on the Hub.
 ACM governance uses its own entrypoint, `manifests/ossm`.
+
+Configure both independently accessible frontend origins, one per managed
+cluster. Both use the same realm and frontend client; no global load balancer
+is required. Replace the nonfunctional `bank-network1-local.example.invalid`
+and `bank-network2-local.example.invalid` origins in every patch value with the
+intended HTTPS origins before provisioning. Include a port if it is nondefault.
+
+- Login `redirectUris` use each origin followed by `/*`, preserving the current
+  page path and query when the browser returns from login.
+- CORS `webOrigins` contain exact bare origins, with no path or trailing slash.
+- `attributes.post.logout.redirect.uris` contains exact bare origins matching
+  the frontend's logout return URL. Store both in one string separated by `##`,
+  with no path wildcard.
+
+The public base uses the corresponding nonfunctional `bank-network1.example.invalid`
+and `bank-network2.example.invalid` placeholders. The JSON patch tests that the
+target client is `intermesh-frontend` before replacing the three fields.
+
+RealmImport provisions a realm initially; it does not reconcile updates to an
+existing realm. Changing these manifests does not update an imported client's
+allowlists. Update an existing realm through a separate administrative operation.
 
 Render from the repository root:
 
