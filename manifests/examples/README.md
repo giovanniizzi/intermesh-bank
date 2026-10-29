@@ -67,6 +67,20 @@ Realm `intermesh-bank` and public client `intermesh-frontend` stay unchanged.
 Browser redirect URI and Web Origin configuration will be handled separately.
 These patches do not provision Keycloak or change realm credentials.
 
+## Hub Keycloak provisioning overlay
+
+Copy [hub-keycloak.kustomization.example.yaml](hub-keycloak.kustomization.example.yaml)
+to `.local/hub-keycloak/kustomization.yaml`. This Git-ignored overlay references
+the public Keycloak base and renders its RealmImport unchanged, with no patches.
+The Keycloak CR and credential Secret remain separate prerequisites on the Hub.
+ACM governance uses its own entrypoint, `manifests/ossm`.
+
+Render from the repository root:
+
+```sh
+oc kustomize .local/hub-keycloak
+```
+
 ## Shared PostgreSQL database
 
 All Ledger workloads across the OpenShift clusters use one shared external
