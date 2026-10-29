@@ -43,13 +43,3 @@ patches:
       - op: replace
         path: /spec/hosts/0
         value: postgres-local.example.invalid
-  - target:
-      group: security.istio.io
-      version: v1beta1
-      kind: AuthorizationPolicy
-      name: restrict-egress-to-db
-      namespace: intermesh-backend
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/to/0/operation/hosts/0
-        value: postgres-local.example.invalid

@@ -129,11 +129,8 @@ The remaining policy files describe workload and gateway identities:
 - [allow-orchestrator-to-ledger.yaml](../manifests/ossm/policies/allow-orchestrator-to-ledger.yaml)
   and [allow-orchestrator-to-analytics.yaml](../manifests/ossm/policies/allow-orchestrator-to-analytics.yaml)
   reference Orchestrator and East-West Gateway principals.
-- [allow-ledger-to-db.yaml](../manifests/ossm/policies/allow-ledger-to-db.yaml)
-  references the external database host and Ledger principal.
 
-Effective authorization depends on workload selectors and the combined policies;
-the database policy alone does not establish outbound database enforcement.
+Effective authorization depends on workload selectors and the combined policies.
 
 ### Service identities
 
@@ -162,10 +159,13 @@ same complete connection string for the single shared database. Preserve the
 database name, schema/search-path options, TLS settings and connection semantics;
 there are no per-cluster databases, schemas or synchronization mechanisms.
 
-The hostname in `DATABASE_URL`, the PostgreSQL ServiceEntry and the database
-policy host reference must agree. Use the
+The hostname in `DATABASE_URL` must agree with the PostgreSQL ServiceEntry
+hostname. Use the
 [PostgreSQL Secret example](../manifests/examples/postgres-secret.example.yaml)
 and keep actual values in protected local configuration.
+
+PostgreSQL egress isolation is not configured. The ServiceEntry registers an
+external destination; it does not restrict database access to Ledger.
 
 ### Keycloak SSO and realm provisioning
 

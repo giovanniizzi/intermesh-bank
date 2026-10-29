@@ -18,7 +18,6 @@ resources:
   - ossm/policies/allow-ingress-to-ui-api.yaml
   - ossm/policies/allow-orchestrator-to-ledger.yaml
   - ossm/policies/allow-orchestrator-to-analytics.yaml
-  - ossm/policies/allow-ledger-to-db.yaml
   - ossm/serviceentry/intermesh-ui-se.yaml
   - ossm/serviceentry/intermesh-orchestrator-se.yaml
   - ossm/serviceentry/intermesh-ledger-se.yaml

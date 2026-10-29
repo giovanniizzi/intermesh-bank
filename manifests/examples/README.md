@@ -63,26 +63,19 @@ existing connection string into the Secret. The Ledger passes `DATABASE_URL`
 through unchanged and exits with a configuration error if it is missing or blank.
 There is no built-in database connection fallback.
 
-The public PostgreSQL ServiceEntry and existing database AuthorizationPolicy use
-`postgres.example.invalid`. The local-overlay example overrides both fields with
+The public PostgreSQL ServiceEntry uses `postgres.example.invalid`.
+The local-overlay example overrides its hostname with
 the deliberately nonfunctional `postgres-local.example.invalid`. For existing
-local overlays, append only the two PostgreSQL patches from the example,
+local overlays, append only the PostgreSQL ServiceEntry patch from the example,
 preserving current image overrides and the WasmPlugin patch.
 
 Replace the test hostname with the same actual PostgreSQL DNS hostname in both
 local overlays. The hostname in the separately provisioned `DATABASE_URL` Secret
-must agree with the ServiceEntry hostname and the policy's hostname field.
+must agree with the ServiceEntry hostname.
 Keep the complete connection string in the Secret, not in Kustomize patches.
 
-### Unresolved security issue: PG-EGRESS-01
-
-**PostgreSQL egress enforcement must be reviewed and resolved before deployment.**
-The existing [database AuthorizationPolicy](../ossm/policies/allow-ledger-to-db.yaml)
-is not a PostgreSQL outbound allowlist: `operation.hosts` is HTTP-specific, and
-the namespace-wide DENY policy has no port restriction and may affect unrelated
-TCP traffic. Neither the ServiceEntry nor this policy establishes a PostgreSQL
-egress security boundary. These hostname overrides preserve the existing policy
-semantics; they do not improve egress enforcement.
+PostgreSQL egress isolation is not configured. The ServiceEntry registers an
+external destination; it does not restrict database access to Ledger.
 
 ### Create the Secret without putting credentials in command arguments
 
