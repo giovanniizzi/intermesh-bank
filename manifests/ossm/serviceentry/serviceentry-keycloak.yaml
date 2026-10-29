@@ -5,7 +5,7 @@ metadata:
   namespace: intermesh-backend
 spec:
   hosts:
-  - sso.apps.cluster-l974n.dynamic.redhatworkshops.io
+  - keycloak.example.invalid
   ports:
   - number: 443
     name: https

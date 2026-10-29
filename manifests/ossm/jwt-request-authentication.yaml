@@ -8,6 +8,6 @@ spec:
     matchLabels:
       app: intermesh-orchestrator
   jwtRules:
-  - issuer: "https://sso.apps.cluster-l974n.dynamic.redhatworkshops.io/realms/intermesh-bank"
-    jwksUri: "https://sso.apps.cluster-l974n.dynamic.redhatworkshops.io/realms/intermesh-bank/protocol/openid-connect/certs"
+  - issuer: "https://keycloak.example.invalid/realms/intermesh-bank"
+    jwksUri: "https://keycloak.example.invalid/realms/intermesh-bank/protocol/openid-connect/certs"
     forwardOriginalToken: true

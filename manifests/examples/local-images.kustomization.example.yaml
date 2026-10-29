@@ -2,6 +2,7 @@
 # For Cluster 2, change the resources entry to ../../overlays/managed-cluster-2.
 # Replace all local-test.invalid references with actual published images.
 # Replace postgres-local.example.invalid with the shared PostgreSQL hostname.
+# Replace keycloak-local.example.invalid consistently with the shared Keycloak host.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -43,3 +44,56 @@ patches:
       - op: replace
         path: /spec/hosts/0
         value: postgres-local.example.invalid
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: intermesh-ui
+      namespace: intermesh-frontend
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: intermesh-ui
+        namespace: intermesh-frontend
+      spec:
+        template:
+          spec:
+            containers:
+              - name: web-frontend
+                env:
+                  - name: KEYCLOAK_URL
+                    value: https://keycloak-local.example.invalid
+  - target:
+      group: security.istio.io
+      version: v1beta1
+      kind: RequestAuthentication
+      name: jwt-keycloak-auth
+      namespace: intermesh-backend
+    patch: |-
+      - op: replace
+        path: /spec/jwtRules/0/issuer
+        value: https://keycloak-local.example.invalid/realms/intermesh-bank
+      - op: replace
+        path: /spec/jwtRules/0/jwksUri
+        value: https://keycloak-local.example.invalid/realms/intermesh-bank/protocol/openid-connect/certs
+  - target:
+      group: security.istio.io
+      version: v1beta1
+      kind: AuthorizationPolicy
+      name: require-jwt-policy
+      namespace: intermesh-backend
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/from/0/source/requestPrincipals/0
+        value: https://keycloak-local.example.invalid/realms/intermesh-bank/*
+  - target:
+      group: networking.istio.io
+      version: v1alpha3
+      kind: ServiceEntry
+      name: keycloak-service-entry
+      namespace: intermesh-backend
+    patch: |-
+      - op: replace
+        path: /spec/hosts/0
+        value: keycloak-local.example.invalid

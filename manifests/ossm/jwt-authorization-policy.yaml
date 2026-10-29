@@ -11,4 +11,4 @@ spec:
   rules:
   - from:
     - source:
-        requestPrincipals: ["https://sso.apps.cluster-l974n.dynamic.redhatworkshops.io/realms/intermesh-bank/*"]
+        requestPrincipals: ["https://keycloak.example.invalid/realms/intermesh-bank/*"]

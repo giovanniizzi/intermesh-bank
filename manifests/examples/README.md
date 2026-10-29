@@ -45,6 +45,28 @@ oc kustomize .local/managed-cluster-1
 oc kustomize .local/managed-cluster-2
 ```
 
+## Shared Keycloak endpoint
+
+Both managed clusters use one canonical Keycloak issuer. Public manifests use
+the nonfunctional `https://keycloak.example.invalid` base URL; the local-overlay
+example uses `https://keycloak-local.example.invalid`.
+
+For existing local overlays, append the example's UI, RequestAuthentication,
+JWT AuthorizationPolicy and Keycloak ServiceEntry patches, preserving existing
+image, WasmPlugin and PostgreSQL overrides. Configure the same endpoint in both
+clusters:
+
+- `KEYCLOAK_URL` is the base HTTPS URL, without `/realms/intermesh-bank`.
+- The issuer is that base URL followed by `/realms/intermesh-bank`; the JWKS URI
+  adds `/protocol/openid-connect/certs` to the issuer.
+- The authorization principal pattern is the issuer followed by `/*`.
+- The ServiceEntry uses only the hostname, without a scheme or path.
+
+Replace the test hostname consistently in all five fields before deployment.
+Realm `intermesh-bank` and public client `intermesh-frontend` stay unchanged.
+Browser redirect URI and Web Origin configuration will be handled separately.
+These patches do not provision Keycloak or change realm credentials.
+
 ## Shared PostgreSQL database
 
 All Ledger workloads across the OpenShift clusters use one shared external
