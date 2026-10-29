@@ -14,6 +14,7 @@ resources:
   - ossm/virtual-service-east-west.yaml
   - ossm/jwt-request-authentication.yaml
   - ossm/jwt-authorization-policy.yaml
+  - ossm/policies/deny-orchestrator-without-jwt.yaml
   - ossm/policies/allow-hub-to-orchestrator.yaml
   - ossm/policies/allow-ingress-to-ui-api.yaml
   - ossm/policies/allow-orchestrator-to-ledger.yaml

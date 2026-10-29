@@ -119,6 +119,20 @@ selects Orchestrator, configures the issuer and JWKS URL, and forwards the origi
 token. The [JWT AuthorizationPolicy](../manifests/ossm/jwt-authorization-policy.yaml)
 uses the issuer principal prefix.
 
+The [JWT requirement policy](../manifests/ossm/policies/deny-orchestrator-without-jwt.yaml)
+requires an authenticated request principal for incoming traffic on Orchestrator's
+HTTP port (`8080`) in both managed clusters. At the receiving Sidecar, requests
+without a valid JWT are rejected regardless of caller or path, including
+diagnostic routes. This requirement complements the service-to-service
+authorization rules.
+
+JWT validation authenticates requests at the service mesh layer; it does not
+enforce access to individual banking resources.
+
+The Orchestrator Deployment defines no Kubernetes health probes. Health checks
+that traverse the receiving Sidecar on port `8080` are subject to the same JWT
+requirement.
+
 The remaining policy files describe workload and gateway identities:
 
 - [allow-hub-to-orchestrator.yaml](../manifests/ossm/policies/allow-hub-to-orchestrator.yaml)
