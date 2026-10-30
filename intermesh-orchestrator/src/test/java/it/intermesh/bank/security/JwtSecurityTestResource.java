@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleManager {
 
@@ -47,6 +48,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     private final AtomicInteger fraudStatus = new AtomicInteger(200);
     private final AtomicInteger commitStatus = new AtomicInteger(200);
     private final AtomicInteger unfreezeStatus = new AtomicInteger(200);
+    private final Map<String, String> transferResponseModes = new ConcurrentHashMap<>();
     private final AtomicReference<Double> availableBalance = new AtomicReference<>(100.0);
     private final AtomicReference<Double> frozenBalance = new AtomicReference<>(0.0);
     private final List<String> transferCalls = new CopyOnWriteArrayList<>();
@@ -96,11 +98,14 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                             "lookupAccount", lastLookupAccount.get(), "historyAccount", lastHistoryAccount.get(),
                             "transfer", transferSnapshot())));
             server.createContext("/test/transfer-outcomes", exchange -> {
-                Map<String, Integer> settings = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
-                freezeStatus.set(settings.getOrDefault("freeze", 200));
-                fraudStatus.set(settings.getOrDefault("fraud", 200));
-                commitStatus.set(settings.getOrDefault("commit", 200));
-                unfreezeStatus.set(settings.getOrDefault("unfreeze", 200));
+                Map<String, Object> settings = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
+                freezeStatus.set(((Number) settings.getOrDefault("freeze", 200)).intValue());
+                fraudStatus.set(((Number) settings.getOrDefault("fraud", 200)).intValue());
+                commitStatus.set(((Number) settings.getOrDefault("commit", 200)).intValue());
+                unfreezeStatus.set(((Number) settings.getOrDefault("unfreeze", 200)).intValue());
+                for (String operation : List.of("freeze", "commit", "unfreeze")) {
+                    transferResponseModes.put(operation, (String) settings.getOrDefault(operation + "Mode", "normal"));
+                }
                 respond(exchange, 200, Map.of());
             });
             server.createContext("/test/block", exchange -> {
@@ -297,6 +302,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
         fraudStatus.set(200);
         commitStatus.set(200);
         unfreezeStatus.set(200);
+        transferResponseModes.clear();
         availableBalance.set(100.0);
         frozenBalance.set(0.0);
         transferCalls.clear();
@@ -325,7 +331,12 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             case "unfreeze" -> { unfreezeCalls.incrementAndGet(); unfreezeRequest.set(request); yield unfreezeStatus.get(); }
             default -> throw new IllegalArgumentException("Unexpected test operation");
         };
-        if (status == 200) {
+        String mode = transferResponseModes.getOrDefault(operation, "normal");
+        if (mode.equals("disconnect-before-mutation")) {
+            exchange.close();
+            return;
+        }
+        if (status == 200 && !mode.equals("acknowledge-only")) {
             double amount = ((Number) request.get("amount")).doubleValue();
             mutationCalls.incrementAndGet();
             switch (operation) {
@@ -340,6 +351,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 }
                 default -> throw new IllegalArgumentException("Unexpected test operation");
             }
+        }
+        if (mode.equals("disconnect-after-mutation")) {
+            exchange.close();
+            return;
         }
         respond(exchange, status, Map.of("status", "COMMITTED", "transaction_id", "TX-TEST"));
     }

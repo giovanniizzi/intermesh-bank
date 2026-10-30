@@ -678,9 +678,22 @@ public class AccountLookupSecurityTest {
         return request.post("/api/v1/transfers");
     }
 
-    private void transferOutcomes(Map<String, Integer> settings) {
+    private void transferOutcomes(Map<String, ?> settings) {
         given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON)
                 .body(settings).post("/test/transfer-outcomes").then().statusCode(200);
+    }
+
+    private void assertCompensationResponse(Response response, String failure, String compensation) {
+        response.then().statusCode(504).body("status", is("FAILED"))
+                .body("reason", is(failure + " " + compensation)).body("size()", is(2));
+        assertNoRestorationClaim(response);
+    }
+
+    private void assertNoRestorationClaim(Response response) {
+        String body = response.asString().toLowerCase(java.util.Locale.ROOT);
+        assertFalse(body.contains("rolled back"));
+        assertFalse(body.contains("funds unlocked"));
+        assertFalse(body.contains("funds restored"));
     }
 
     private void assertTransferState(List<String> calls, int mutations, float balance, float frozen) {
@@ -713,24 +726,32 @@ public class AccountLookupSecurityTest {
     @Test
     void transferWorkflowFreezeRefusalStopsBeforeFraud() {
         transferOutcomes(Map.of("freeze", 201));
-        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(400)
-                .body("status", is("REJECTED"));
+        Response response = transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null);
+        response.then().statusCode(400).body("status", is("REJECTED"))
+                .body("reason", is("Ledger freeze was not acknowledged; financial outcome was not confirmed."));
+        assertNoRestorationClaim(response);
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
     }
 
     @Test
     void transferWorkflowFreezeFailureStopsBeforeFraud() {
-        transferOutcomes(Map.of("freeze", 503));
-        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504)
-                .body("reason", is("Ledger infrastructure down."));
-        assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
+        for (int status : List.of(422, 503, 504)) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of("freeze", status));
+            Response response = transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null);
+            response.then().statusCode(504).body("status", is("FAILED"))
+                    .body("reason", is("Ledger freeze was not acknowledged; financial outcome was not confirmed."));
+            assertNoRestorationClaim(response);
+            assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
+        }
     }
 
     @Test
     void transferWorkflowFraudRefusalCompensates() {
         transferOutcomes(Map.of("fraud", 201));
-        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504)
-                .body("reason", is("Transaction verification timeout bounds breached. Funds rolled back safely."));
+        assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                "Transaction verification did not complete.",
+                "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 2, 100.0f, 0.0f);
         given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
                 .body("transfer.unfreezeRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)));
@@ -739,23 +760,129 @@ public class AccountLookupSecurityTest {
     @Test
     void transferWorkflowFraudFailureCompensates() {
         transferOutcomes(Map.of("fraud", 503));
-        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504);
+        assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                "Transaction verification did not complete.",
+                "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 2, 100.0f, 0.0f);
     }
 
     @Test
     void transferWorkflowCommitFailureCompensates() {
         transferOutcomes(Map.of("commit", 503));
-        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504)
-                .body("reason", is("Ledger infrastructure down during commit. Funds rolled back."));
+        assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                "Ledger commit outcome was not confirmed.",
+                "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit", "unfreeze"), 2, 100.0f, 0.0f);
     }
 
     @Test
     void transferWorkflowFailedCompensationDoesNotRetry() {
-        transferOutcomes(Map.of("fraud", 503, "unfreeze", 503));
-        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504);
-        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 1, 87.5f, 12.5f);
+        for (String failure : List.of("fraud", "commit")) {
+            for (int status : List.of(403, 500, 503)) {
+                resetLedgerCalls();
+                transferOutcomes(Map.of(failure, 503, "unfreeze", status));
+                assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                        transferFailureMessage(failure),
+                        "Unfreeze request failed; restoration was not confirmed.");
+                assertTransferState(compensationCalls(failure), 1, 87.5f, 12.5f);
+            }
+        }
+    }
+
+    private String transferFailureMessage(String failure) {
+        return failure.equals("fraud") ? "Transaction verification did not complete."
+                : "Ledger commit outcome was not confirmed.";
+    }
+
+    private List<String> compensationCalls(String failure) {
+        return failure.equals("fraud") ? List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze")
+                : List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit", "unfreeze");
+    }
+
+    @Test
+    void transferWorkflowLostCompensationResponseIsUnknownWithoutRetry() {
+        for (String failure : List.of("fraud", "commit")) {
+            for (String mode : List.of("disconnect-before-mutation", "disconnect-after-mutation")) {
+                resetLedgerCalls();
+                transferOutcomes(Map.of(failure, 503, "unfreezeMode", mode));
+                assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                        transferFailureMessage(failure),
+                        "Unfreeze outcome is unknown; restoration was not confirmed.");
+                boolean restored = mode.equals("disconnect-after-mutation");
+                assertTransferState(compensationCalls(failure), restored ? 2 : 1,
+                        restored ? 100.0f : 87.5f, restored ? 0.0f : 12.5f);
+            }
+        }
+    }
+
+    @Test
+    void transferWorkflowCompensationTimeoutResponseIsUnknown() {
+        for (String failure : List.of("fraud", "commit")) {
+            for (int status : List.of(408, 504)) {
+                resetLedgerCalls();
+                transferOutcomes(Map.of(failure, 503, "unfreeze", status));
+                assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                        transferFailureMessage(failure),
+                        "Unfreeze outcome is unknown; restoration was not confirmed.");
+                assertTransferState(compensationCalls(failure), 1, 87.5f, 12.5f);
+            }
+        }
+    }
+
+    @Test
+    void transferWorkflowAcknowledgmentDoesNotProveRestoration() {
+        for (String failure : List.of("fraud", "commit")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of(failure, 503, "unfreezeMode", "acknowledge-only"));
+            assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                    transferFailureMessage(failure),
+                    "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
+            assertTransferState(compensationCalls(failure), 1, 87.5f, 12.5f);
+        }
+    }
+
+    @Test
+    void transferWorkflowUnexpectedCompensationResponseIsUnknown() {
+        for (String failure : List.of("fraud", "commit")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of(failure, 503, "unfreeze", 201));
+            assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                    transferFailureMessage(failure),
+                    "Unfreeze outcome is unknown; restoration was not confirmed.");
+            assertTransferState(compensationCalls(failure), 1, 87.5f, 12.5f);
+        }
+    }
+
+    @Test
+    void transferWorkflowLostFreezeResponseDoesNotRetryOrCompensate() {
+        for (String mode : List.of("disconnect-before-mutation", "disconnect-after-mutation")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of("freezeMode", mode));
+            Response response = transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null);
+            response.then().statusCode(504).body("status", is("FAILED"))
+                    .body("reason", is("Ledger freeze was not acknowledged; financial outcome was not confirmed."));
+            assertNoRestorationClaim(response);
+            boolean frozen = mode.equals("disconnect-after-mutation");
+            assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), frozen ? 1 : 0,
+                    frozen ? 87.5f : 100.0f, frozen ? 12.5f : 0.0f);
+        }
+    }
+
+    @Test
+    void transferWorkflowLostCommitResponsePreservesUnknownOutcome() {
+        for (String mode : List.of("acknowledge-only", "explicit-failure", "disconnect-before-mutation")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of("commitMode", "disconnect-after-mutation",
+                    "unfreeze", mode.equals("explicit-failure") ? 503 : 200, "unfreezeMode", mode));
+            String compensation = switch (mode) {
+                case "acknowledge-only" -> "Unfreeze request acknowledged by Ledger; restoration was not independently verified.";
+                case "explicit-failure" -> "Unfreeze request failed; restoration was not confirmed.";
+                default -> "Unfreeze outcome is unknown; restoration was not confirmed.";
+            };
+            assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                    "Ledger commit outcome was not confirmed.", compensation);
+            assertTransferState(compensationCalls("commit"), 2, 87.5f, 0.0f);
+        }
     }
 
     @Test
