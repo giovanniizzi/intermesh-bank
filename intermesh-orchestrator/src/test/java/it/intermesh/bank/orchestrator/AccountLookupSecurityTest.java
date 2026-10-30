@@ -447,7 +447,7 @@ public class AccountLookupSecurityTest {
                 .body(Map.of("source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1))
                 .post("/api/v1/transfers").then().statusCode(200);
         given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
-                .body("count", is(5)).body("fraudCalls", is(1));
+                .body("count", is(6)).body("fraudCalls", is(1));
     }
 
     @Test
@@ -665,6 +665,217 @@ public class AccountLookupSecurityTest {
                     .get("/api/v1/account/" + id + "/transactions").then().statusCode(403);
             assertHistoryCalls(1, 0);
         }
+    }
+
+    private Map<String, Object> transferPayload(String source, String target) {
+        return Map.of("source_account", source, "target_account", target, "amount", 12.5);
+    }
+
+    private Response transfer(String source, String target, String jwt, String session) {
+        var request = given().contentType(ContentType.JSON).body(transferPayload(source, target));
+        if (jwt != null) { request.header("Authorization", "Bearer " + jwt); }
+        if (session != null) { request.cookie("JSESSIONID", session); }
+        return request.post("/api/v1/transfers");
+    }
+
+    private void transferOutcomes(Map<String, Integer> settings) {
+        given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON)
+                .body(settings).post("/test/transfer-outcomes").then().statusCode(200);
+    }
+
+    private void assertTransferState(List<String> calls, int mutations, float balance, float frozen) {
+        int fraud = (int) calls.stream().filter("fraud"::equals).count();
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then().statusCode(200)
+                .body("count", is(calls.size() - fraud))
+                .body("accountLookups", is((int) calls.stream().filter(call -> call.startsWith("lookup:")).count()))
+                .body("historyCalls", is(0)).body("fraudCalls", is(fraud))
+                .body("transfer.calls", is(calls))
+                .body("transfer.freezeCalls", is((int) calls.stream().filter("freeze"::equals).count()))
+                .body("transfer.commitCalls", is((int) calls.stream().filter("commit"::equals).count()))
+                .body("transfer.unfreezeCalls", is((int) calls.stream().filter("unfreeze"::equals).count()))
+                .body("transfer.mutationCalls", is(mutations))
+                .body("transfer.balance", is(balance)).body("transfer.frozen", is(frozen));
+    }
+
+    @Test
+    void transferWorkflowSuccessPreservesRequestsAndResponse() {
+        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(200)
+                .body("ledgerTransferResponseDTO.status", is("COMMITTED"))
+                .body("ledgerTransferResponseDTO.transaction_id", is("TX-TEST"));
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.freezeRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)))
+                .body("transfer.commitRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)))
+                .body("transfer.fraudRequest", is(Map.of("source_account", "ACC-ALICE",
+                        "target_account", "ACC-BOB", "amount", 12.5f)));
+    }
+
+    @Test
+    void transferWorkflowFreezeRefusalStopsBeforeFraud() {
+        transferOutcomes(Map.of("freeze", 201));
+        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(400)
+                .body("status", is("REJECTED"));
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
+    }
+
+    @Test
+    void transferWorkflowFreezeFailureStopsBeforeFraud() {
+        transferOutcomes(Map.of("freeze", 503));
+        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504)
+                .body("reason", is("Ledger infrastructure down."));
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
+    }
+
+    @Test
+    void transferWorkflowFraudRefusalCompensates() {
+        transferOutcomes(Map.of("fraud", 201));
+        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504)
+                .body("reason", is("Transaction verification timeout bounds breached. Funds rolled back safely."));
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 2, 100.0f, 0.0f);
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.unfreezeRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)));
+    }
+
+    @Test
+    void transferWorkflowFraudFailureCompensates() {
+        transferOutcomes(Map.of("fraud", 503));
+        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504);
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 2, 100.0f, 0.0f);
+    }
+
+    @Test
+    void transferWorkflowCommitFailureCompensates() {
+        transferOutcomes(Map.of("commit", 503));
+        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504)
+                .body("reason", is("Ledger infrastructure down during commit. Funds rolled back."));
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit", "unfreeze"), 2, 100.0f, 0.0f);
+    }
+
+    @Test
+    void transferWorkflowFailedCompensationDoesNotRetry() {
+        transferOutcomes(Map.of("fraud", 503, "unfreeze", 503));
+        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(504);
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 1, 87.5f, 12.5f);
+    }
+
+    @Test
+    void anotherOwnersTransferSourceIsForbiddenRegardlessOfDestination() {
+        for (String destination : List.of("ACC-ALICE", "ACC-BOB")) {
+            String session = aliceSession();
+            Response denied = transfer("ACC-BOB", destination, token(claims("user-a")), session);
+            denied.then().statusCode(403).body("error", is("Access denied")).body("size()", is(1));
+            assertNull(denied.getCookie("JSESSIONID"));
+            assertTransferState(List.of("lookup:ACC-BOB"), 0, 100.0f, 0.0f);
+        }
+    }
+
+    @Test
+    void transferSessionMismatchInvalidatesBeforeAnyLookupOrMutation() {
+        String session = aliceSession();
+        String bobJwt = token(claims("user-b"));
+        Response denied = transfer("ACC-BOB", "ACC-ALICE", bobJwt, session);
+        denied.then().statusCode(403).body("error", is("Access denied"));
+        expiredSessionCookie(denied);
+        assertTransferState(List.of(), 0, 100.0f, 0.0f);
+        transfer("ACC-BOB", "ACC-ALICE", bobJwt, null).then().statusCode(200);
+        assertTransferState(List.of("lookup:ACC-BOB", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
+    }
+
+    @Test
+    void transferRequiresCurrentValidBearerBeforeAnyLookupOrMutation() {
+        String session = aliceSession();
+        transfer("ACC-ALICE", "ACC-BOB", null, session).then().statusCode(401);
+        assertTransferState(List.of(), 0, 100.0f, 0.0f);
+        Map<String, Object> expired = claims("user-a");
+        expired.put("exp", Instant.now().minusSeconds(300).getEpochSecond());
+        Map<String, Object> wrongIssuer = claims("user-a");
+        wrongIssuer.put("iss", "https://other-issuer.example.invalid/realms/intermesh-bank");
+        Map<String, Object> unusable = claims("user-a");
+        unusable.remove("preferred_username");
+        for (String jwt : List.of("not-a-jwt", token(claims("user-a"), "/test/token/invalid-signature"),
+                token(expired), token(wrongIssuer), token(unusable))) {
+            transfer("ACC-ALICE", "ACC-BOB", jwt, session).then().statusCode(401);
+            assertTransferState(List.of(), 0, 100.0f, 0.0f);
+        }
+    }
+
+    @Test
+    void forgedIdentityHeaderCannotAuthorizeATransfer() {
+        given().header("x-intermesh-user", "user-a").contentType(ContentType.JSON)
+                .body(transferPayload("ACC-ALICE", "ACC-BOB")).post("/api/v1/transfers")
+                .then().statusCode(401);
+        assertTransferState(List.of(), 0, 100.0f, 0.0f);
+        given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .header("x-intermesh-user", "user-b").contentType(ContentType.JSON)
+                .body(transferPayload("ACC-BOB", "ACC-BOB")).post("/api/v1/transfers")
+                .then().statusCode(403).body("error", is("Access denied"));
+        assertTransferState(List.of("lookup:ACC-BOB"), 0, 100.0f, 0.0f);
+    }
+
+    @Test
+    void ownedTransferUsesRequestSourceDespiteCachedAccountAndForgedHeader() {
+        String session = aliceSession(); // Lookup cached ACC-TEST, not the transfer's source.
+        given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + token(claims("user-a")))
+                .header("x-intermesh-user", "user-b").contentType(ContentType.JSON)
+                .body(transferPayload("ACC-ALICE", "ACC-BOB")).post("/api/v1/transfers")
+                .then().statusCode(200);
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
+    }
+
+    @Test
+    void unknownTransferSourceIsNotFoundWithoutAnyFinancialMutation() {
+        transfer("ACC-MISSING", "ACC-BOB", token(claims("user-a")), null).then().statusCode(404)
+                .body("error", is("Account not found")).body("size()", is(1));
+        assertTransferState(List.of("lookup:ACC-MISSING"), 0, 100.0f, 0.0f);
+    }
+
+    @Test
+    void malformedTransferSourceResponsesFailClosedBeforeAnyFinancialMutation() {
+        for (String source : List.of("ACC-NULL", "ACC-NO-OWNER", "ACC-BLANK-OWNER", "ACC-WRONG-ID",
+                "ACC-NO-ID", "ACC-MALFORMED")) {
+            resetLedgerCalls();
+            transfer(source, "ACC-BOB", token(claims("user-a")), null).then().statusCode(502)
+                    .body("status", is("FAILED")).body("reason", is("Core Ledger source account lookup failed."))
+                    .body("size()", is(2));
+            assertTransferState(List.of("lookup:" + source), 0, 100.0f, 0.0f);
+        }
+    }
+
+    @Test
+    void transferSourceLookupFailuresPreserveStatusWithoutAnyFinancialMutation() {
+        for (int status : List.of(500, 503)) {
+            resetLedgerCalls();
+            String source = "ACC-LOOKUP-" + status;
+            transfer(source, "ACC-BOB", token(claims("user-a")), null).then().statusCode(status)
+                    .body("status", is("FAILED")).body("reason", is("Core Ledger request failed."))
+                    .body("size()", is(2));
+            assertTransferState(List.of("lookup:" + source), 0, 100.0f, 0.0f);
+        }
+    }
+
+    @Test
+    void transferOwnerComparisonIsExact() {
+        for (String source : List.of("ACC-CASE", "ACC-PADDED")) {
+            resetLedgerCalls();
+            transfer(source, "ACC-BOB", token(claims("user-a")), null).then().statusCode(403)
+                    .body("error", is("Access denied"));
+            assertTransferState(List.of("lookup:" + source), 0, 100.0f, 0.0f);
+        }
+    }
+
+    @Test
+    void missingTransferSourceFailsBeforeAnyLookupOrMutation() {
+        String jwt = token(claims("user-a"));
+        for (Map<String, Object> payload : List.of(Map.<String, Object>of("target_account", "ACC-BOB", "amount", 12.5),
+                transferPayload("", "ACC-BOB"), transferPayload(" ", "ACC-BOB"))) {
+            given().header("Authorization", "Bearer " + jwt).contentType(ContentType.JSON)
+                    .body(payload).post("/api/v1/transfers").then().statusCode(400)
+                    .body("error", is("Source account is required"));
+            assertTransferState(List.of(), 0, 100.0f, 0.0f);
+        }
+        given().header("Authorization", "Bearer " + jwt).contentType(ContentType.JSON).body("null")
+                .post("/api/v1/transfers").then().statusCode(400);
+        assertTransferState(List.of(), 0, 100.0f, 0.0f);
     }
 
     @Test

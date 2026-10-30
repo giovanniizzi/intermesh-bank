@@ -26,6 +26,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleManager {
 
@@ -38,6 +39,21 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     private final AtomicReference<String> lastLookupAccount = new AtomicReference<>("");
     private final AtomicReference<String> lastHistoryAccount = new AtomicReference<>("");
     private final AtomicReference<String> lastOwner = new AtomicReference<>("");
+    private final AtomicInteger freezeCalls = new AtomicInteger();
+    private final AtomicInteger commitCalls = new AtomicInteger();
+    private final AtomicInteger unfreezeCalls = new AtomicInteger();
+    private final AtomicInteger mutationCalls = new AtomicInteger();
+    private final AtomicInteger freezeStatus = new AtomicInteger(200);
+    private final AtomicInteger fraudStatus = new AtomicInteger(200);
+    private final AtomicInteger commitStatus = new AtomicInteger(200);
+    private final AtomicInteger unfreezeStatus = new AtomicInteger(200);
+    private final AtomicReference<Double> availableBalance = new AtomicReference<>(100.0);
+    private final AtomicReference<Double> frozenBalance = new AtomicReference<>(0.0);
+    private final List<String> transferCalls = new CopyOnWriteArrayList<>();
+    private final AtomicReference<Map<String, Object>> freezeRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> fraudRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> commitRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> unfreezeRequest = new AtomicReference<>(Map.of());
     private HttpServer server;
     private URI baseUri;
     private KeyPair signingKey;
@@ -67,6 +83,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 lastLookupAccount.set("");
                 lastHistoryAccount.set("");
                 lastOwner.set("");
+                resetTransfers();
                 release.countDown();
                 blocked = new CountDownLatch(0);
                 exchange.sendResponseHeaders(204, -1);
@@ -76,7 +93,16 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                     Map.of("count", ledgerCalls.get(), "owner", lastOwner.get(), "jwksCalls", jwksCalls.get(),
                             "fraudCalls", fraudCalls.get(), "blocked", blocked.getCount() == 0,
                             "accountLookups", accountLookups.get(), "historyCalls", historyCalls.get(),
-                            "lookupAccount", lastLookupAccount.get(), "historyAccount", lastHistoryAccount.get())));
+                            "lookupAccount", lastLookupAccount.get(), "historyAccount", lastHistoryAccount.get(),
+                            "transfer", transferSnapshot())));
+            server.createContext("/test/transfer-outcomes", exchange -> {
+                Map<String, Integer> settings = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
+                freezeStatus.set(settings.getOrDefault("freeze", 200));
+                fraudStatus.set(settings.getOrDefault("fraud", 200));
+                commitStatus.set(settings.getOrDefault("commit", 200));
+                unfreezeStatus.set(settings.getOrDefault("unfreeze", 200));
+                respond(exchange, 200, Map.of());
+            });
             server.createContext("/test/block", exchange -> {
                 blocked = new CountDownLatch(1);
                 release = new CountDownLatch(1);
@@ -89,7 +115,9 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             server.createContext("/v1/ledger", this::ledger);
             server.createContext("/v2/fraud", exchange -> {
                 fraudCalls.incrementAndGet();
-                respond(exchange, 200, Map.of());
+                transferCalls.add("fraud");
+                fraudRequest.set(json.readValue(exchange.getRequestBody(), new TypeReference<>() {}));
+                respond(exchange, fraudStatus.get(), Map.of());
             });
             server.start();
             return Map.of(
@@ -168,8 +196,11 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 String owner = (String) request.get("user_id");
                 lastOwner.set(owner);
                 respond(exchange, 200, account(owner));
+            } else if (path.equals("/v1/ledger/freeze") || path.equals("/v1/ledger/commit")
+                    || path.equals("/v1/ledger/unfreeze")) {
+                financialOperation(exchange, path.substring("/v1/ledger/".length()));
             } else {
-                respond(exchange, 200, Map.of("status", "COMMITTED", "transaction_id", "TX-TEST"));
+                respond(exchange, 500, Map.of("error", "Unexpected Ledger operation"));
             }
             return;
         }
@@ -180,6 +211,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                         StandardCharsets.UTF_8);
                 accountLookups.incrementAndGet();
                 lastLookupAccount.set(id);
+                transferCalls.add("lookup:" + id);
                 if (id.equals("ACC-MISSING")) {
                     respond(exchange, 404, Map.of("error", "Synthetic upstream detail"));
                 } else if (id.equals("ACC-LOOKUP-500") || id.equals("ACC-LOOKUP-503")) {
@@ -188,6 +220,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                     respond(exchange, 200, null);
                 } else if (id.equals("ACC-NO-OWNER")) {
                     respond(exchange, 200, Map.of("account_id", id));
+                } else if (id.equals("ACC-NO-ID")) {
+                    respond(exchange, 200, Map.of("user_id", "user-a"));
+                } else if (id.equals("ACC-MALFORMED")) {
+                    respond(exchange, 200, List.of(account("user-a", id)));
                 } else if (id.equals("ACC-WRONG-ID")) {
                     respond(exchange, 200, account("user-a", "ACC-OTHER"));
                 } else {
@@ -250,6 +286,62 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
 
     private Map<String, Object> account(String owner) {
         return account(owner, "ACC-TEST");
+    }
+
+    private void resetTransfers() {
+        freezeCalls.set(0);
+        commitCalls.set(0);
+        unfreezeCalls.set(0);
+        mutationCalls.set(0);
+        freezeStatus.set(200);
+        fraudStatus.set(200);
+        commitStatus.set(200);
+        unfreezeStatus.set(200);
+        availableBalance.set(100.0);
+        frozenBalance.set(0.0);
+        transferCalls.clear();
+        freezeRequest.set(Map.of());
+        fraudRequest.set(Map.of());
+        commitRequest.set(Map.of());
+        unfreezeRequest.set(Map.of());
+    }
+
+    private Map<String, Object> transferSnapshot() {
+        return Map.ofEntries(
+                Map.entry("freezeCalls", freezeCalls.get()), Map.entry("commitCalls", commitCalls.get()),
+                Map.entry("unfreezeCalls", unfreezeCalls.get()), Map.entry("mutationCalls", mutationCalls.get()),
+                Map.entry("balance", availableBalance.get()), Map.entry("frozen", frozenBalance.get()),
+                Map.entry("calls", List.copyOf(transferCalls)), Map.entry("freezeRequest", freezeRequest.get()),
+                Map.entry("fraudRequest", fraudRequest.get()), Map.entry("commitRequest", commitRequest.get()),
+                Map.entry("unfreezeRequest", unfreezeRequest.get()));
+    }
+
+    private void financialOperation(HttpExchange exchange, String operation) throws IOException {
+        Map<String, Object> request = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
+        transferCalls.add(operation);
+        int status = switch (operation) {
+            case "freeze" -> { freezeCalls.incrementAndGet(); freezeRequest.set(request); yield freezeStatus.get(); }
+            case "commit" -> { commitCalls.incrementAndGet(); commitRequest.set(request); yield commitStatus.get(); }
+            case "unfreeze" -> { unfreezeCalls.incrementAndGet(); unfreezeRequest.set(request); yield unfreezeStatus.get(); }
+            default -> throw new IllegalArgumentException("Unexpected test operation");
+        };
+        if (status == 200) {
+            double amount = ((Number) request.get("amount")).doubleValue();
+            mutationCalls.incrementAndGet();
+            switch (operation) {
+                case "freeze" -> {
+                    availableBalance.updateAndGet(value -> value - amount);
+                    frozenBalance.updateAndGet(value -> value + amount);
+                }
+                case "commit" -> frozenBalance.updateAndGet(value -> value - amount);
+                case "unfreeze" -> {
+                    availableBalance.updateAndGet(value -> value + amount);
+                    frozenBalance.updateAndGet(value -> value - amount);
+                }
+                default -> throw new IllegalArgumentException("Unexpected test operation");
+            }
+        }
+        respond(exchange, status, Map.of("status", "COMMITTED", "transaction_id", "TX-TEST"));
     }
 
     private Map<String, Object> account(String owner, String id) {

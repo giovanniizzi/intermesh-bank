@@ -2,6 +2,7 @@ package it.intermesh.bank.orchestrator;
 
 import it.intermesh.bank.dto.request.TransferRequestDTO;
 import it.intermesh.bank.dto.response.LedgerTransferResponseDTO;
+import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
 import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import it.intermesh.bank.dto.response.TransferResponseDTO;
 import it.intermesh.bank.dto.request.LedgerTransactionRequestDTO;
@@ -9,6 +10,7 @@ import it.intermesh.bank.dto.request.FraudAnalysisRequestDTO;
 import it.intermesh.bank.restclient.LedgerClient;
 import it.intermesh.bank.restclient.FraudClient;
 import it.intermesh.bank.security.BankingSessionGuard;
+import it.intermesh.bank.security.BankingIdentity;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -17,6 +19,8 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.ProcessingException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
@@ -47,7 +51,37 @@ public class TransferOrchestrator {
     @Path("/transfers")
     @Authenticated
     public Response processTransfer(TransferRequestDTO transferRequestDTO) {
-        sessionGuard.requireIdentity();
+        BankingIdentity identity = sessionGuard.requireIdentity();
+        String sourceAccount = transferRequestDTO == null ? null : transferRequestDTO.getSource_account();
+        if (sourceAccount == null || sourceAccount.isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Source account is required")).build();
+        }
+
+        try {
+            LedgerAccountResponseDTO account = ledgerClient.getAccountBalance(sourceAccount);
+            if (account == null || !sourceAccount.equals(account.getAccount_id())
+                    || account.getUser_id() == null || account.getUser_id().isBlank()) {
+                throw new ProcessingException("Invalid Ledger account response");
+            }
+            if (!identity.ownerKey().equals(account.getUser_id())) {
+                return Response.status(Response.Status.FORBIDDEN)
+                        .entity(Map.of("error", "Access denied")).build();
+            }
+        } catch (WebApplicationException e) {
+            int status = e.getResponse().getStatus();
+            if (status == Response.Status.NOT_FOUND.getStatusCode()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(Map.of("error", "Account not found")).build();
+            }
+            return Response.status(status)
+                    .entity(Map.of("status", "FAILED", "reason", "Core Ledger request failed.")).build();
+        } catch (Exception e) {
+            LOG.error("[TransferOrchestrator] Core Ledger source account lookup failed.");
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity(Map.of("status", "FAILED", "reason", "Core Ledger source account lookup failed.")).build();
+        }
+
         LOG.info(String.format("[TransferOrchestrator] Wire transfer processing requested: €%.2f from %s to %s", 
                 transferRequestDTO.getAmount(), transferRequestDTO.getSource_account(), transferRequestDTO.getTarget_account()));
 
