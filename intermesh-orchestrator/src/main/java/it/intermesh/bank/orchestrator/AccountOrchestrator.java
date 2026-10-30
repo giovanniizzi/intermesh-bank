@@ -7,10 +7,9 @@ import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
 import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import it.intermesh.bank.restclient.LedgerClient;
 import it.intermesh.bank.security.BankingIdentity;
-import it.intermesh.bank.security.BankingIdentityProvider;
+import it.intermesh.bank.security.BankingSessionGuard;
 import io.quarkus.security.Authenticated;
 import io.vertx.ext.web.RoutingContext;
-import io.vertx.ext.web.Session;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -38,17 +37,14 @@ public class AccountOrchestrator {
     LedgerClient ledgerClient;
 
     @Inject
-    RoutingContext routingContext;
-
-    @Inject
-    BankingIdentityProvider identityProvider;
+    BankingSessionGuard sessionGuard;
 
     @GET
     @Path("/accounts/{userID}")
     @Produces(MediaType.APPLICATION_JSON)
     @Authenticated
     public Response getUserAccounts(@PathParam("userID") String userID, @Context RoutingContext rc) {
-        BankingIdentity identity = identityProvider.requireIdentity();
+        BankingIdentity identity = sessionGuard.requireIdentity();
         if (!identity.ownerKey().equals(userID)) {
             return Response.status(Response.Status.FORBIDDEN)
                 .entity(Map.of("error", "Access denied")).build();
@@ -65,26 +61,21 @@ public class AccountOrchestrator {
         LedgerAccountResponseDTO account = accounts.get(0);
         
         // Session Persistence (Vert.x Context)
-        Session session = routingContext.session();
-        if (session != null) {
+        sessionGuard.withSession(session -> {
             session.put("account_id", account.getAccount_id());
             session.put("iban", account.getIban());
             session.put("balance", account.getBalance());
-        }
+            return null;
+        });
 
         return Response.ok(account).build();
     }
 
     @POST
     @Path("/accounts")
+    @Authenticated
     public Response onboardCustomer(AccountCreationRequestDTO accountCreationRequestDTO, @Context RoutingContext rc) {
-        
-        String keycloakUserId = rc.request().getHeader("x-intermesh-user");
-        
-        if (keycloakUserId == null || keycloakUserId.isEmpty()) {
-            keycloakUserId = "usr_test_123"; 
-            LOG.warn("[AccountOrchestrator] Using dev fallback User ID: " + keycloakUserId);
-        }
+        String keycloakUserId = sessionGuard.requireIdentity().ownerKey();
 
         LOG.info(String.format("[AccountOrchestrator] Onboarding request from User ID [%s]", keycloakUserId));
 
@@ -103,16 +94,12 @@ public class AccountOrchestrator {
                     .entity(Map.of("status", "FAILED", "reason", "Core network timeout.")).build();
         }
 
-        Session session = routingContext.session();
-        String tokenString = "";
-        if (session != null) {
+        String tokenString = sessionGuard.withSession(session -> {
             session.put("ACCOUNT_ID", ledgerResponse.getAccount_id());
             session.put("IBAN", ledgerResponse.getIban());
             session.put("USER_ID", keycloakUserId);
-
-            tokenString = session.id();
-            LOG.info(String.format("[AccountOrchestrator] Session created with ID: %s for User ID: %s", tokenString, keycloakUserId));  
-        }
+            return session.id();
+        });
 
         AccountCreationResponseDTO responseBody = new AccountCreationResponseDTO(
             "ACCOUNT_PROVISIONED_SUCCESSFULLY",
@@ -126,7 +113,9 @@ public class AccountOrchestrator {
     @GET
     @Path("/account/{id}/transactions")
     @Produces(MediaType.APPLICATION_JSON)
+    @Authenticated
     public Response getAccountHistory(@PathParam("id") String accountId) {
+        sessionGuard.requireIdentity();
         LOG.info("[TransferOrchestrator] Intercepted historical ledger lookup request for account: " + accountId);
         
         try {

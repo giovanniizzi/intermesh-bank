@@ -38,11 +38,16 @@ public class HelloOrchestrator {
         String cookieHeader = routingContext.request().getHeader("Cookie");
         System.out.println("Cookie received: " + cookieHeader);
 
-        if (session.get("initialized") == null) {
-            message += "This is a new session with session id: " + session.id();
-            session.put("initialized", true);
-        } else {
-            message += "This is an existing session with session id: " + session.id();
+        synchronized (session) {
+            if (session.isDestroyed()) {
+                return message + "Session expired.";
+            }
+            if (session.get("initialized") == null) {
+                message += "This is a new session with session id: " + session.id();
+                session.put("initialized", true);
+            } else {
+                message += "This is an existing session with session id: " + session.id();
+            }
         }
 
         return message;

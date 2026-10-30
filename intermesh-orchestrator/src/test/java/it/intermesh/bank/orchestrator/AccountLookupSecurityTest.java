@@ -5,6 +5,7 @@ import static io.restassured.config.LogConfig.logConfig;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.*;
 
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -16,6 +17,9 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -234,14 +238,14 @@ public class AccountLookupSecurityTest {
     }
 
     @Test
-    void differentSubjectCanAccessOwnAccountWithAnExistingSession() {
+    void differentSubjectCannotReuseAnExistingSession() {
         String session = given().header("Authorization", "Bearer " + token(claims("user-a")))
                 .get("/api/v1/accounts/user-a").then().statusCode(200).extract().cookie("JSESSIONID");
         resetLedgerCalls();
         given().cookie("JSESSIONID", session)
                 .header("Authorization", "Bearer " + token(claims("user-b")))
-                .get("/api/v1/accounts/user-b").then().statusCode(200).body("user_id", is("user-b"));
-        assertLedgerCalls(1, "user-b");
+                .get("/api/v1/accounts/user-b").then().statusCode(403);
+        assertLedgerCalls(0, "");
     }
 
     @Test
@@ -251,6 +255,264 @@ public class AccountLookupSecurityTest {
         resetLedgerCalls();
         given().cookie("JSESSIONID", session).get("/api/v1/accounts/user-a").then().statusCode(401);
         assertLedgerCalls(0, "");
+    }
+
+    private String aliceSession() {
+        String id = given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/accounts/user-a").then().statusCode(200).extract().cookie("JSESSIONID");
+        assertNotNull(id);
+        resetLedgerCalls();
+        return id;
+    }
+
+    private void noDownstreamCalls() {
+        assertLedgerCalls(0, "");
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("fraudCalls", is(0));
+    }
+
+    private void expiredSessionCookie(Response response) {
+        var cookie = response.getDetailedCookie("JSESSIONID");
+        assertNotNull(cookie);
+        assertEquals(0, cookie.getMaxAge());
+        assertEquals("/", cookie.getPath());
+        assertFalse(cookie.isSecured());
+        assertFalse(cookie.isHttpOnly()); // Preserve the attributes of the existing custom handler.
+        assertNull(response.getCookie("network1.session"));
+        assertNull(response.getCookie("network2.session"));
+        assertNull(response.getHeader("Location"));
+    }
+
+    @Test
+    void sameSubjectRetainsSessionAndCrossAccountDenialDoesNotDestroyIt() {
+        String session = aliceSession();
+        String jwt = token(claims("user-a"));
+        given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                .get("/api/v1/accounts/user-b").then().statusCode(403);
+        noDownstreamCalls();
+        Response response = given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                .get("/api/v1/accounts/user-a");
+        response.then().statusCode(200);
+        assertNull(response.getCookie("JSESSIONID"));
+        given().cookie("JSESSIONID", session).get("/hello/session").then().statusCode(200)
+                .body(org.hamcrest.Matchers.containsString(session));
+    }
+
+    @Test
+    void mismatchExpiresCookieAndBobRetriesWithoutKeycloakReauthentication() {
+        for (String requested : List.of("user-a", "user-b")) {
+            String retired = aliceSession();
+            String bobJwt = token(claims("user-b"));
+            Response denied = given().cookie("JSESSIONID", retired).header("Authorization", "Bearer " + bobJwt)
+                    .get("/api/v1/accounts/" + requested);
+            denied.then().statusCode(403).body("error", is("Access denied"));
+            expiredSessionCookie(denied);
+            noDownstreamCalls();
+            Response retry = given().header("Authorization", "Bearer " + bobJwt)
+                    .get("/api/v1/accounts/user-b");
+            retry.then().statusCode(200).body("user_id", is("user-b"));
+            assertNotEquals(retired, retry.getCookie("JSESSIONID"));
+            // Even an explicit replay of the old identifier is a lookup miss, never Alice's state.
+            Response replay = given().cookie("JSESSIONID", retired).header("Authorization", "Bearer " + bobJwt)
+                    .get("/api/v1/accounts/user-b");
+            replay.then().statusCode(200);
+            assertNotNull(replay.getCookie("JSESSIONID"));
+            assertNotEquals(retired, replay.getCookie("JSESSIONID"));
+        }
+    }
+
+    @Test
+    void invalidBearerCannotUseAnExistingSession() {
+        String session = aliceSession();
+        Map<String, Object> unusable = claims("user-a");
+        unusable.remove("preferred_username");
+        Map<String, Object> expired = claims("user-a");
+        expired.put("exp", Instant.now().minusSeconds(300).getEpochSecond());
+        for (String jwt : List.of("not-a-jwt", token(claims("user-b"), "/test/token/invalid-signature"),
+                token(unusable), token(expired))) {
+            given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                    .get("/api/v1/accounts/user-a").then().statusCode(401);
+            noDownstreamCalls();
+        }
+    }
+
+    @Test
+    void refreshedJwtForSameSubjectPreservesSession() {
+        String session = aliceSession();
+        Map<String, Object> refreshed = claims("user-a");
+        refreshed.put("jti", "synthetic-refreshed-token");
+        Response response = given().cookie("JSESSIONID", session)
+                .header("Authorization", "Bearer " + token(refreshed)).get("/api/v1/accounts/user-a");
+        response.then().statusCode(200);
+        assertNull(response.getCookie("JSESSIONID"));
+    }
+
+    @Test
+    void bindingUsesSubjectRatherThanUsername() {
+        String session = aliceSession();
+        Map<String, Object> changedSubject = claims("user-a");
+        changedSubject.put("sub", "different-subject-with-same-username");
+        Response response = given().cookie("JSESSIONID", session)
+                .header("Authorization", "Bearer " + token(changedSubject)).get("/api/v1/accounts/user-a");
+        response.then().statusCode(403);
+        expiredSessionCookie(response);
+        noDownstreamCalls();
+    }
+
+    @Test
+    void anonymousSessionIsClearedAndRotatedBeforeBinding() {
+        Response anonymous = given().get("/hello/session");
+        anonymous.then().statusCode(200);
+        String oldId = anonymous.getCookie("JSESSIONID");
+        Response authenticated = given().cookie("JSESSIONID", oldId)
+                .header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/accounts/user-a");
+        authenticated.then().statusCode(200);
+        String newId = authenticated.getCookie("JSESSIONID");
+        assertNotNull(newId);
+        assertNotEquals(oldId, newId);
+        given().cookie("JSESSIONID", newId).get("/hello/session").then().statusCode(200)
+                .body(org.hamcrest.Matchers.containsString("This is a new session"));
+    }
+
+    @Test
+    void unknownSessionIdInitializesFreshLocalState() {
+        String unknown = "0123456789abcdef0123456789abcdef";
+        Response response = given().cookie("JSESSIONID", unknown)
+                .header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/accounts/user-a");
+        response.then().statusCode(200);
+        assertNotNull(response.getCookie("JSESSIONID"));
+        assertNotEquals(unknown, response.getCookie("JSESSIONID"));
+    }
+
+    @Test
+    void expiredLocalSessionCanInitializeForAnotherSubject() throws InterruptedException {
+        String expired = aliceSession();
+        Thread.sleep(11_000); // The HTTP fixture sets the application session timeout to ten seconds.
+        Response response = given().cookie("JSESSIONID", expired)
+                .header("Authorization", "Bearer " + token(claims("user-b")))
+                .get("/api/v1/accounts/user-b");
+        response.then().statusCode(200);
+        assertNotNull(response.getCookie("JSESSIONID"));
+        assertNotEquals(expired, response.getCookie("JSESSIONID"));
+    }
+
+    @Test
+    void everyBankingEndpointRejectsMismatchedSessionsBeforeAnyDownstreamCall() {
+        for (String endpoint : List.of("/api/v1/accounts", "/api/v1/account/ACC-TEST/transactions", "/api/v1/transfers")) {
+            String session = aliceSession();
+            var request = given().cookie("JSESSIONID", session)
+                    .header("Authorization", "Bearer " + token(claims("user-b")))
+                    .header("x-intermesh-user", "user-a").contentType(ContentType.JSON);
+            Response response;
+            if (endpoint.endsWith("transactions")) {
+                response = request.get(endpoint);
+            } else {
+                response = request.body(endpoint.endsWith("transfers")
+                        ? Map.of("source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1)
+                        : Map.of("holder_name", "Test Account", "initial_deposit", 100)).post(endpoint);
+            }
+            response.then().statusCode(403);
+            expiredSessionCookie(response);
+            noDownstreamCalls();
+        }
+    }
+
+    @Test
+    void allBankingEndpointsRequireCurrentBearerWithExistingSession() {
+        String session = aliceSession();
+        given().cookie("JSESSIONID", session).contentType(ContentType.JSON).body("{}")
+                .post("/api/v1/accounts").then().statusCode(401);
+        given().cookie("JSESSIONID", session).get("/api/v1/account/ACC-TEST/transactions")
+                .then().statusCode(401);
+        given().cookie("JSESSIONID", session).contentType(ContentType.JSON).body("{}")
+                .post("/api/v1/transfers").then().statusCode(401);
+        noDownstreamCalls();
+    }
+
+    @Test
+    void sameSubjectCanCreateReadHistoryAndTransferWithExistingContracts() {
+        String session = aliceSession();
+        String jwt = token(claims("user-a"));
+        given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                .header("x-intermesh-user", "user-b").contentType(ContentType.JSON)
+                .body(Map.of("holder_name", "Test Account", "initial_deposit", 100))
+                .post("/api/v1/accounts").then().statusCode(201)
+                .body("session_token", is(session)).body("account_details.user_id", is("user-a"));
+        given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                .get("/api/v1/account/ACC-TEST/transactions").then().statusCode(200);
+        given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                .contentType(ContentType.JSON)
+                .body(Map.of("source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1))
+                .post("/api/v1/transfers").then().statusCode(200);
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("count", is(4)).body("fraudCalls", is(1));
+    }
+
+    @Test
+    void inFlightLookupCannotRestoreStateAfterConcurrentMismatch() throws Exception {
+        String retired = aliceSession();
+        String aliceJwt = token(claims("user-a"));
+        String bobJwt = token(claims("user-b"));
+        given().baseUri(fixtureUri.toString()).post("/test/block").then().statusCode(200);
+        CompletableFuture<Response> inFlight = CompletableFuture.supplyAsync(() ->
+                given().cookie("JSESSIONID", retired).header("Authorization", "Bearer " + aliceJwt)
+                        .get("/api/v1/accounts/user-a"));
+        try {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            boolean blocked = false;
+            while (System.nanoTime() < deadline) {
+                blocked = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls")
+                        .jsonPath().getBoolean("blocked");
+                if (blocked) { break; }
+                Thread.sleep(20);
+            }
+            assertTrue(blocked, "Lookup must reach the controlled downstream barrier");
+            Response denied = given().cookie("JSESSIONID", retired).header("Authorization", "Bearer " + bobJwt)
+                    .get("/api/v1/accounts/user-b");
+            denied.then().statusCode(403);
+            expiredSessionCookie(denied);
+            assertLedgerCalls(1, "user-a");
+        } finally {
+            given().baseUri(fixtureUri.toString()).post("/test/release").then().statusCode(200);
+        }
+        Response late = inFlight.get(5, TimeUnit.SECONDS);
+        late.then().statusCode(403);
+        expiredSessionCookie(late);
+        Response retry = given().cookie("JSESSIONID", retired).header("Authorization", "Bearer " + bobJwt)
+                .get("/api/v1/accounts/user-b");
+        retry.then().statusCode(200);
+        assertNotEquals(retired, retry.getCookie("JSESSIONID"));
+    }
+
+    @Test
+    void concurrentRequestsFromSameSubjectCanShareSessionWithoutLockingRemoteCalls() throws Exception {
+        String session = aliceSession();
+        String jwt = token(claims("user-a"));
+        given().baseUri(fixtureUri.toString()).post("/test/block").then().statusCode(200);
+        CompletableFuture<Response> inFlight = CompletableFuture.supplyAsync(() ->
+                given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                        .get("/api/v1/accounts/user-a"));
+        try {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            boolean blocked = false;
+            while (System.nanoTime() < deadline) {
+                blocked = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls")
+                        .jsonPath().getBoolean("blocked");
+                if (blocked) { break; }
+                Thread.sleep(20);
+            }
+            assertTrue(blocked);
+            given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                    .get("/api/v1/accounts/user-a").then().statusCode(200);
+            assertLedgerCalls(2, "user-a");
+        } finally {
+            given().baseUri(fixtureUri.toString()).post("/test/release").then().statusCode(200);
+        }
+        Response completed = inFlight.get(5, TimeUnit.SECONDS);
+        completed.then().statusCode(200);
+        assertNull(completed.getCookie("JSESSIONID"));
     }
 
     @Test

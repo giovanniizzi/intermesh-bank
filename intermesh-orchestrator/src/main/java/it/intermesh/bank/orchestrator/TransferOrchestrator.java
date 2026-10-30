@@ -8,6 +8,8 @@ import it.intermesh.bank.dto.request.LedgerTransactionRequestDTO;
 import it.intermesh.bank.dto.request.FraudAnalysisRequestDTO;
 import it.intermesh.bank.restclient.LedgerClient;
 import it.intermesh.bank.restclient.FraudClient;
+import it.intermesh.bank.security.BankingSessionGuard;
+import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -38,9 +40,14 @@ public class TransferOrchestrator {
     @RestClient
     FraudClient fraudClient;
 
+    @Inject
+    BankingSessionGuard sessionGuard;
+
     @POST
     @Path("/transfers")
+    @Authenticated
     public Response processTransfer(TransferRequestDTO transferRequestDTO) {
+        sessionGuard.requireIdentity();
         LOG.info(String.format("[TransferOrchestrator] Wire transfer processing requested: €%.2f from %s to %s", 
                 transferRequestDTO.getAmount(), transferRequestDTO.getSource_account(), transferRequestDTO.getTarget_account()));
 
