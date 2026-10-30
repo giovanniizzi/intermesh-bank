@@ -27,6 +27,8 @@ spec:
         - containerPort: 8080
           name: http
         env:
+        - name: MP_JWT_VERIFY_ISSUER
+          value: "https://keycloak.example.invalid/realms/intermesh-bank"
         - name: QUARKUS_REST_CLIENT_LEDGER_API_URL
           value: "http://intermesh-ledger.intermesh-backend.svc.cluster.local:8080"
         - name: FRAUD_ANALYTICS_URL

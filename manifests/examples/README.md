@@ -51,18 +51,20 @@ Both managed clusters use one canonical Keycloak issuer. Public manifests use
 the nonfunctional `https://keycloak.example.invalid` base URL; the local-overlay
 example uses `https://keycloak-local.example.invalid`.
 
-For existing local overlays, append the example's UI, RequestAuthentication,
-JWT AuthorizationPolicy and Keycloak ServiceEntry patches, preserving existing
-image, WasmPlugin and PostgreSQL overrides. Configure the same endpoint in both
-clusters:
+For existing local overlays, append the example's Orchestrator, UI,
+RequestAuthentication, JWT AuthorizationPolicy and Keycloak ServiceEntry patches,
+preserving existing image, WasmPlugin and PostgreSQL overrides. Configure the same
+endpoint in both clusters:
 
 - `KEYCLOAK_URL` is the base HTTPS URL, without `/realms/intermesh-bank`.
 - The issuer is that base URL followed by `/realms/intermesh-bank`; the JWKS URI
   adds `/protocol/openid-connect/certs` to the issuer.
+- Set the Orchestrator's `MP_JWT_VERIFY_ISSUER` to the same issuer as Istio.
+  Quarkus derives its JWKS URI from this value and verifies bearer JWTs independently.
 - The authorization principal pattern is the issuer followed by `/*`.
 - The ServiceEntry uses only the hostname, without a scheme or path.
 
-Replace the test hostname consistently in all five fields before deployment.
+Replace the test hostname consistently throughout the overlay before deployment.
 Realm `intermesh-bank` and public client `intermesh-frontend` stay unchanged.
 Browser redirect, Web Origin and logout allowlists use the Hub provisioning
 overlay below.

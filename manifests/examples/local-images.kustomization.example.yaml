@@ -25,6 +25,26 @@ images:
 
 patches:
   - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: intermesh-orchestrator
+      namespace: intermesh-backend
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: intermesh-orchestrator
+        namespace: intermesh-backend
+      spec:
+        template:
+          spec:
+            containers:
+              - name: orchestrator
+                env:
+                  - name: MP_JWT_VERIFY_ISSUER
+                    value: https://keycloak-local.example.invalid/realms/intermesh-bank
+  - target:
       group: extensions.istio.io
       version: v1alpha1
       kind: WasmPlugin

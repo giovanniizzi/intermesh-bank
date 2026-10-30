@@ -129,10 +129,6 @@ authorization rules.
 JWT validation authenticates requests at the service mesh layer; it does not
 enforce access to individual banking resources.
 
-The Orchestrator Deployment defines no Kubernetes health probes. Health checks
-that traverse the receiving Sidecar on port `8080` are subject to the same JWT
-requirement.
-
 The remaining policy files describe workload and gateway identities:
 
 - [allow-hub-to-orchestrator.yaml](../manifests/ossm/policies/allow-hub-to-orchestrator.yaml)

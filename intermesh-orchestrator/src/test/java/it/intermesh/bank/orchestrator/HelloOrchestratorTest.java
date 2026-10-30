@@ -1,18 +1,15 @@
 package it.intermesh.bank.orchestrator;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.common.QuarkusTestResource;
+import it.intermesh.bank.security.JwtSecurityTestResource;
 import org.junit.jupiter.api.Test;
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-
 @QuarkusTest
+@QuarkusTestResource(JwtSecurityTestResource.class)
 class HelloOrchestratorTest {
-
-    @ConfigProperty(name = "HOSTNAME", defaultValue = "Local-Machine")
-    String podName;
 
     @Test
     void testHelloEndpoint() {

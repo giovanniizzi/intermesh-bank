@@ -6,6 +6,9 @@ import it.intermesh.bank.dto.response.AccountCreationResponseDTO;
 import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
 import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import it.intermesh.bank.restclient.LedgerClient;
+import it.intermesh.bank.security.BankingIdentity;
+import it.intermesh.bank.security.BankingIdentityProvider;
+import io.quarkus.security.Authenticated;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.Session;
 import jakarta.inject.Inject;
@@ -37,24 +40,22 @@ public class AccountOrchestrator {
     @Inject
     RoutingContext routingContext;
 
+    @Inject
+    BankingIdentityProvider identityProvider;
+
     @GET
     @Path("/accounts/{userID}")
     @Produces(MediaType.APPLICATION_JSON)
+    @Authenticated
     public Response getUserAccounts(@PathParam("userID") String userID, @Context RoutingContext rc) {
-        
-        /* 
-        // Identity Extraction dagli header propagati dalla Service Mesh
-        String authenticatedUser = rc.request().getHeader("x-intermesh-user");
-        LOG.info(String.format("[AccountOrchestrator] GET Profile lookup for userID: %s (Authenticated: %s)", userID, authenticatedUser));
-
-        if (authenticatedUser == null || !userID.equalsIgnoreCase(authenticatedUser)) {
+        BankingIdentity identity = identityProvider.requireIdentity();
+        if (!identity.ownerKey().equals(userID)) {
             return Response.status(Response.Status.FORBIDDEN)
-                .entity("{\"error\":\"Access Denied: Identity token mismatch constraints\"}").build();
+                .entity(Map.of("error", "Access denied")).build();
         }
-        */
 
         // Find all user accounts from Ledger
-        List<LedgerAccountResponseDTO> accounts = ledgerClient.getUserAccounts(userID);
+        List<LedgerAccountResponseDTO> accounts = ledgerClient.getUserAccounts(identity.ownerKey());
         
         if (accounts == null || accounts.isEmpty()) {
             return Response.status(Response.Status.NOT_FOUND)
