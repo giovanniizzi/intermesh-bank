@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"intermesh-ledger/internal/dto"
 	"intermesh-ledger/internal/repository"
+	"io"
 	"log"
 	"net/http"
 )
@@ -16,10 +18,28 @@ func NewLedgerHandler(repo *repository.AccountRepository) *LedgerHandler {
 	return &LedgerHandler{Repo: repo}
 }
 
+func decodeWrite(w http.ResponseWriter, r *http.Request, payload any) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err := decoder.Decode(payload); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("invalid trailing JSON")
+	}
+	return nil
+}
+
+func invalidMonetaryRequest(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]string{"error": "Invalid monetary request"})
+}
+
 func (h *LedgerHandler) HandleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	var payload dto.AccountCreationPayloadDTO
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Malformed JSON input", http.StatusBadRequest)
+	if err := decodeWrite(w, r, &payload); err != nil || !payload.InitialDeposit.Valid(true) {
+		invalidMonetaryRequest(w)
 		return
 	}
 
@@ -37,7 +57,10 @@ func (h *LedgerHandler) HandleCreateAccount(w http.ResponseWriter, r *http.Reque
 
 func (h *LedgerHandler) HandleFreeze(w http.ResponseWriter, r *http.Request) {
 	var payload dto.LedgerPayloadDTO
-	json.NewDecoder(r.Body).Decode(&payload)
+	if err := decodeWrite(w, r, &payload); err != nil || !payload.Amount.Valid(false) {
+		invalidMonetaryRequest(w)
+		return
+	}
 
 	txID, err := h.Repo.FreezeFunds(payload)
 	if err != nil {
@@ -57,7 +80,10 @@ func (h *LedgerHandler) HandleFreeze(w http.ResponseWriter, r *http.Request) {
 
 func (h *LedgerHandler) HandleCommit(w http.ResponseWriter, r *http.Request) {
 	var payload dto.LedgerPayloadDTO
-	json.NewDecoder(r.Body).Decode(&payload)
+	if err := decodeWrite(w, r, &payload); err != nil || !payload.Amount.Valid(false) {
+		invalidMonetaryRequest(w)
+		return
+	}
 
 	txID, err := h.Repo.CommitTransaction(payload)
 	if err != nil {
@@ -72,7 +98,10 @@ func (h *LedgerHandler) HandleCommit(w http.ResponseWriter, r *http.Request) {
 
 func (h *LedgerHandler) HandleUnfreeze(w http.ResponseWriter, r *http.Request) {
 	var payload dto.LedgerPayloadDTO
-	json.NewDecoder(r.Body).Decode(&payload)
+	if err := decodeWrite(w, r, &payload); err != nil || !payload.Amount.Valid(false) {
+		invalidMonetaryRequest(w)
+		return
+	}
 
 	err := h.Repo.RollbackTransaction(payload)
 	if err != nil {

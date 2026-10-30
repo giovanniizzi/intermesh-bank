@@ -12,6 +12,10 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import io.restassured.RestAssured;
 import it.intermesh.bank.security.JwtSecurityTestResource;
+import it.intermesh.bank.validation.MonetaryAmountsTest;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -669,6 +673,103 @@ public class AccountLookupSecurityTest {
 
     private Map<String, Object> transferPayload(String source, String target) {
         return Map.of("source_account", source, "target_account", target, "amount", 12.5);
+    }
+
+    private String monetaryBody(String field, String token) {
+        return "{\"source_account\":\"ACC-ALICE\",\"target_account\":\"ACC-BOB\",\"holder_name\":\"Test\",\""
+                + field + "\":" + token + "}";
+    }
+
+    private Response monetaryRequest(String endpoint, String body, String jwt) {
+        return given().header("Authorization", "Bearer " + jwt).contentType(ContentType.JSON)
+                .body(body).post("/api/v1/" + endpoint);
+    }
+
+    private void assertRecordedAmount(String request, String field, String canonical) throws Exception {
+        String snapshot = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls")
+                .then().statusCode(200).extract().asString();
+        var node = new ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .readTree(snapshot).path("transfer").path(request).path(field);
+        assertTrue(node.isNumber(), "outbound amount must be a JSON number");
+        assertEquals(0, new BigDecimal(canonical).compareTo(node.decimalValue()));
+    }
+
+    @Test
+    void invalidMonetaryTokensAreRejectedBeforeAllDownstreamCalls() {
+        String jwt = token(claims("user-a"));
+        for (String endpoint : List.of("accounts", "transfers")) {
+            String field = endpoint.equals("accounts") ? "initial_deposit" : "amount";
+            for (String value : MonetaryAmountsTest.INVALID) {
+                monetaryRequest(endpoint, monetaryBody(field, value), jwt).then().statusCode(400)
+                        .body("error", is("Invalid monetary request")).body("size()", is(1));
+                noDownstreamCalls();
+            }
+            monetaryRequest(endpoint, monetaryBody(field, "1".repeat(257)), jwt).then().statusCode(400);
+            noDownstreamCalls();
+        }
+    }
+
+    @Test
+    void missingZeroAndMalformedMonetaryBodiesAreRejected() {
+        String jwt = token(claims("user-a"));
+        for (String endpoint : List.of("accounts", "transfers")) {
+            String field = endpoint.equals("accounts") ? "initial_deposit" : "amount";
+            for (String body : List.of("{}", "null", "[]", "true", "", "{",
+                    monetaryBody(field, "1") + " garbage", monetaryBody(field, "1") + " {}",
+                    monetaryBody(field, "1") + " ".repeat(64 << 10))) {
+                monetaryRequest(endpoint, body, jwt).then().statusCode(400);
+                noDownstreamCalls();
+            }
+        }
+        for (String zero : List.of("0", "0.00", "-0.00", "0e2")) {
+            monetaryRequest("transfers", monetaryBody("amount", zero), jwt).then().statusCode(400)
+                    .body("error", is("Invalid monetary request"));
+            noDownstreamCalls();
+        }
+    }
+
+    @Test
+    void validExactTransferAmountsRemainNumericOnTheWire() throws Exception {
+        String jwt = token(claims("user-a"));
+        for (var tc : MonetaryAmountsTest.VALID) {
+            resetLedgerCalls();
+            monetaryRequest("transfers", monetaryBody("amount", tc.token()), jwt).then().statusCode(200);
+            assertRecordedAmount("freezeRequest", "amount", tc.canonical());
+            assertRecordedAmount("commitRequest", "amount", tc.canonical());
+            given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                    .body("transfer.calls", is(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit")))
+                    .body("transfer.mutationCalls", is(2));
+        }
+    }
+
+    @Test
+    void validExactOpeningDepositsIncludingExplicitZeroRemainNumeric() throws Exception {
+        String jwt = token(claims("user-a"));
+        for (var tc : MonetaryAmountsTest.VALID) {
+            resetLedgerCalls();
+            monetaryRequest("accounts", monetaryBody("initial_deposit", tc.token()), jwt).then().statusCode(201);
+            assertRecordedAmount("creationRequest", "initial_deposit", tc.canonical());
+            assertLedgerCalls(1, "user-a");
+        }
+        for (String zero : List.of("0", "0.00", "-0.00", "0e2")) {
+            resetLedgerCalls();
+            monetaryRequest("accounts", monetaryBody("initial_deposit", zero), jwt).then().statusCode(201);
+            assertRecordedAmount("creationRequest", "initial_deposit", "0.00");
+            assertLedgerCalls(1, "user-a");
+        }
+    }
+
+    @Test
+    void validatedDecimalIsReusedForAcknowledgedCompensation() throws Exception {
+        transferOutcomes(Map.of("fraud", 503));
+        assertCompensationResponse(monetaryRequest("transfers", monetaryBody("amount", "12.3000"),
+                token(claims("user-a"))), "Transaction verification did not complete.",
+                "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
+        assertRecordedAmount("freezeRequest", "amount", "12.30");
+        assertRecordedAmount("unfreezeRequest", "amount", "12.30");
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.calls", is(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze")))
+                .body("transfer.mutationCalls", is(2));
     }
 
     private Response transfer(String source, String target, String jwt, String session) {

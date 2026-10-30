@@ -8,6 +8,7 @@ import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import it.intermesh.bank.restclient.LedgerClient;
 import it.intermesh.bank.security.BankingIdentity;
 import it.intermesh.bank.security.BankingSessionGuard;
+import it.intermesh.bank.validation.MonetaryAmounts;
 import io.quarkus.security.Authenticated;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.inject.Inject;
@@ -23,6 +24,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+import java.math.BigDecimal;
 import java.util.Map;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -78,13 +80,15 @@ public class AccountOrchestrator {
     @Authenticated
     public Response onboardCustomer(AccountCreationRequestDTO accountCreationRequestDTO, @Context RoutingContext rc) {
         String keycloakUserId = sessionGuard.requireIdentity().ownerKey();
+        BigDecimal initialDeposit = MonetaryAmounts.require(
+                accountCreationRequestDTO == null ? null : accountCreationRequestDTO.getInitial_deposit(), true);
 
         LOG.info(String.format("[AccountOrchestrator] Onboarding request from User ID [%s]", keycloakUserId));
 
         LedgerAccountCreationRequestDTO ledgerRequest = new LedgerAccountCreationRequestDTO(
             keycloakUserId,
             accountCreationRequestDTO.getHolder_name(),      
-            accountCreationRequestDTO.getInitial_deposit()   
+            initialDeposit
         );
 
         LedgerAccountResponseDTO ledgerResponse;

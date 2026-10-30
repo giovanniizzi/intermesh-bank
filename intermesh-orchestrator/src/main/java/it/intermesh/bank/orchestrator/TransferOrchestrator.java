@@ -11,6 +11,7 @@ import it.intermesh.bank.restclient.LedgerClient;
 import it.intermesh.bank.restclient.FraudClient;
 import it.intermesh.bank.security.BankingSessionGuard;
 import it.intermesh.bank.security.BankingIdentity;
+import it.intermesh.bank.validation.MonetaryAmounts;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -25,6 +26,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 import java.util.List;
+import java.math.BigDecimal;
 import java.util.Map;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -58,6 +60,8 @@ public class TransferOrchestrator {
                     .entity(Map.of("error", "Source account is required")).build();
         }
 
+        BigDecimal amount = MonetaryAmounts.require(transferRequestDTO.getAmount(), false);
+
         try {
             LedgerAccountResponseDTO account = ledgerClient.getAccountBalance(sourceAccount);
             if (account == null || !sourceAccount.equals(account.getAccount_id())
@@ -86,7 +90,7 @@ public class TransferOrchestrator {
 
         LedgerTransactionRequestDTO ledgerTxRequest = new LedgerTransactionRequestDTO(
             transferRequestDTO.getSource_account(), 
-            transferRequestDTO.getAmount()
+            amount
         );
 
         try (Response ledgerResp = ledgerClient.freezeFunds(ledgerTxRequest)) {
@@ -104,7 +108,7 @@ public class TransferOrchestrator {
         FraudAnalysisRequestDTO fraudRequest = new FraudAnalysisRequestDTO(
             transferRequestDTO.getSource_account(),
             transferRequestDTO.getTarget_account(),
-            transferRequestDTO.getAmount()
+            amount.doubleValue()
         );
 
         boolean verificationAcknowledged;

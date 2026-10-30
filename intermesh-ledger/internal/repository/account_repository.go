@@ -41,7 +41,7 @@ func (r *AccountRepository) CreateAccount(payload dto.AccountCreationPayloadDTO)
 		UserID:        payload.UserID,
 		IBAN:          mockIBAN,
 		HolderName:    payload.HolderName,
-		Balance:       payload.InitialDeposit,
+		Balance:       payload.InitialDeposit.Float64(),
 		FrozenBalance: 0.00,
 	}
 	return account, nil

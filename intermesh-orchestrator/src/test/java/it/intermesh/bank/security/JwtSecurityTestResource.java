@@ -2,6 +2,7 @@ package it.intermesh.bank.security;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
@@ -56,6 +57,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     private final AtomicReference<Map<String, Object>> fraudRequest = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, Object>> commitRequest = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, Object>> unfreezeRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> creationRequest = new AtomicReference<>(Map.of());
     private HttpServer server;
     private URI baseUri;
     private KeyPair signingKey;
@@ -197,7 +199,8 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
         String path = exchange.getRequestURI().getRawPath();
         if (exchange.getRequestMethod().equals("POST")) {
             if (path.equals("/v1/ledger/accounts")) {
-                Map<String, Object> request = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
+                Map<String, Object> request = readMonetaryRequest(exchange);
+                creationRequest.set(request);
                 String owner = (String) request.get("user_id");
                 lastOwner.set(owner);
                 respond(exchange, 200, account(owner));
@@ -310,6 +313,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
         fraudRequest.set(Map.of());
         commitRequest.set(Map.of());
         unfreezeRequest.set(Map.of());
+        creationRequest.set(Map.of());
     }
 
     private Map<String, Object> transferSnapshot() {
@@ -319,11 +323,16 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 Map.entry("balance", availableBalance.get()), Map.entry("frozen", frozenBalance.get()),
                 Map.entry("calls", List.copyOf(transferCalls)), Map.entry("freezeRequest", freezeRequest.get()),
                 Map.entry("fraudRequest", fraudRequest.get()), Map.entry("commitRequest", commitRequest.get()),
-                Map.entry("unfreezeRequest", unfreezeRequest.get()));
+                Map.entry("unfreezeRequest", unfreezeRequest.get()), Map.entry("creationRequest", creationRequest.get()));
+    }
+
+    private Map<String, Object> readMonetaryRequest(HttpExchange exchange) throws IOException {
+        return json.readerFor(new TypeReference<Map<String, Object>>() {})
+                .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(exchange.getRequestBody());
     }
 
     private void financialOperation(HttpExchange exchange, String operation) throws IOException {
-        Map<String, Object> request = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
+        Map<String, Object> request = readMonetaryRequest(exchange);
         transferCalls.add(operation);
         int status = switch (operation) {
             case "freeze" -> { freezeCalls.incrementAndGet(); freezeRequest.set(request); yield freezeStatus.get(); }

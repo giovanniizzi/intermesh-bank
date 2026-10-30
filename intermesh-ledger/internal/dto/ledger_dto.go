@@ -10,15 +10,15 @@ type AccountDTO struct {
 }
 
 type AccountCreationPayloadDTO struct {
-	UserID         string  `json:"user_id"`
-	HolderName     string  `json:"holder_name"`
-	InitialDeposit float64 `json:"initial_deposit"`
+	UserID         string `json:"user_id"`
+	HolderName     string `json:"holder_name"`
+	InitialDeposit Amount `json:"initial_deposit"`
 }
 
 type LedgerPayloadDTO struct {
-	AccountID     string  `json:"account_id"`
-	TargetAccount string  `json:"target_account"`
-	Amount        float64 `json:"amount"`
+	AccountID     string `json:"account_id"`
+	TargetAccount string `json:"target_account"`
+	Amount        Amount `json:"amount"`
 }
 
 type TransactionHistoryDTO struct {
