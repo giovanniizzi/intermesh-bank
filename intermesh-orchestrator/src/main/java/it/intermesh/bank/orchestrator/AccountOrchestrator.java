@@ -17,6 +17,8 @@ import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.ProcessingException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -115,17 +117,32 @@ public class AccountOrchestrator {
     @Produces(MediaType.APPLICATION_JSON)
     @Authenticated
     public Response getAccountHistory(@PathParam("id") String accountId) {
-        sessionGuard.requireIdentity();
-        LOG.info("[TransferOrchestrator] Intercepted historical ledger lookup request for account: " + accountId);
-        
+        BankingIdentity identity = sessionGuard.requireIdentity();
+
         try {
-            // Fetch the raw history layout directly from the Go Core Ledger
+            LedgerAccountResponseDTO account = ledgerClient.getAccountBalance(accountId);
+            if (account == null || !accountId.equals(account.getAccount_id())
+                    || account.getUser_id() == null || account.getUser_id().isBlank()) {
+                throw new ProcessingException("Invalid Ledger account response");
+            }
+            if (!identity.ownerKey().equals(account.getUser_id())) {
+                return Response.status(Response.Status.FORBIDDEN)
+                        .entity(Map.of("error", "Access denied")).build();
+            }
+
             List<TransactionHistoryDTO> history = ledgerClient.getTransactionHistory(accountId);
-            
-            // Return a clean corporate response stream
             return Response.ok(history).build();
+        } catch (WebApplicationException e) {
+            int status = e.getResponse().getStatus();
+            if (status == Response.Status.NOT_FOUND.getStatusCode()) {
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(Map.of("error", "Account not found")).build();
+            }
+            return Response.status(status)
+                    .entity(Map.of("status", "FAILED", "reason", "Core Ledger request failed."))
+                    .build();
         } catch (Exception e) {
-            LOG.error("[TransferOrchestrator] Failed to fetch transaction history from Core Ledger", e);
+            LOG.error("[AccountOrchestrator] Core Ledger transaction history request failed.");
             return Response.status(Response.Status.BAD_GATEWAY)
                     .entity(Map.of("status", "FAILED", "reason", "Core Ledger synchronization fault during lookup."))
                     .build();

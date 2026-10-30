@@ -447,7 +447,7 @@ public class AccountLookupSecurityTest {
                 .body(Map.of("source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1))
                 .post("/api/v1/transfers").then().statusCode(200);
         given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
-                .body("count", is(4)).body("fraudCalls", is(1));
+                .body("count", is(5)).body("fraudCalls", is(1));
     }
 
     @Test
@@ -513,6 +513,158 @@ public class AccountLookupSecurityTest {
         Response completed = inFlight.get(5, TimeUnit.SECONDS);
         completed.then().statusCode(200);
         assertNull(completed.getCookie("JSESSIONID"));
+    }
+
+    private void assertHistoryCalls(int lookups, int histories) {
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then().statusCode(200)
+                .body("accountLookups", is(lookups)).body("historyCalls", is(histories))
+                .body("count", is(lookups + histories)).body("fraudCalls", is(0));
+    }
+
+    @Test
+    void ownedTransactionHistoryPreservesResponseFields() {
+        String session = aliceSession();
+        given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/account/ACC-ALICE/transactions").then().statusCode(200)
+                .body("size()", is(1))
+                .body("[0].transaction_id", is("TX-ACC-ALICE"))
+                .body("[0].target_iban", is("TEST-TARGET-IBAN"))
+                .body("[0].amount", is(12.5f))
+                .body("[0].status", is("COMMITTED"))
+                .body("[0].timestamp", is("2026-01-01 12:00:00+00"));
+        assertHistoryCalls(1, 1);
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("lookupAccount", is("ACC-ALICE")).body("historyAccount", is("ACC-ALICE"));
+    }
+
+    @Test
+    void anotherOwnersTransactionHistoryIsForbiddenBeforeHistoryFetch() {
+        String session = aliceSession();
+        Response denied = given().cookie("JSESSIONID", session)
+                .header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/account/ACC-BOB/transactions");
+        denied.then().statusCode(403).body("error", is("Access denied")).body("size()", is(1));
+        assertNull(denied.getCookie("JSESSIONID"));
+        assertHistoryCalls(1, 0);
+    }
+
+    @Test
+    void unknownHistoryAccountReturnsSanitizedNotFound() {
+        given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/account/ACC-MISSING/transactions").then().statusCode(404)
+                .body("error", is("Account not found")).body("size()", is(1));
+        assertHistoryCalls(1, 0);
+    }
+
+    @Test
+    void historyWithoutBearerIsUnauthorizedBeforeAnyLedgerCall() {
+        given().get("/api/v1/account/ACC-ALICE/transactions").then().statusCode(401);
+        assertHistoryCalls(0, 0);
+    }
+
+    @Test
+    void historyWithInvalidBearerAndExistingSessionIsUnauthorized() {
+        String session = aliceSession();
+        Map<String, Object> expired = claims("user-a");
+        expired.put("exp", Instant.now().minusSeconds(300).getEpochSecond());
+        Map<String, Object> missingOwner = claims("user-a");
+        missingOwner.remove("preferred_username");
+        for (String jwt : List.of("not-a-jwt", token(claims("user-a"), "/test/token/invalid-signature"),
+                token(expired), token(missingOwner))) {
+            given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
+                    .get("/api/v1/account/ACC-ALICE/transactions").then().statusCode(401);
+            assertHistoryCalls(0, 0);
+        }
+    }
+
+    @Test
+    void historySessionMismatchInvalidatesBeforeAccountLookupAndAllowsFreshRetry() {
+        String retired = aliceSession();
+        String bobJwt = token(claims("user-b"));
+        Response denied = given().cookie("JSESSIONID", retired).header("Authorization", "Bearer " + bobJwt)
+                .get("/api/v1/account/ACC-BOB/transactions");
+        denied.then().statusCode(403).body("error", is("Access denied"));
+        expiredSessionCookie(denied);
+        assertHistoryCalls(0, 0);
+        given().header("Authorization", "Bearer " + bobJwt)
+                .get("/api/v1/account/ACC-BOB/transactions").then().statusCode(200)
+                .body("[0].transaction_id", is("TX-ACC-BOB"));
+        assertHistoryCalls(1, 1);
+    }
+
+    @Test
+    void forgedIdentityHeaderCannotAuthorizeAnotherOwnersHistory() {
+        given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .header("x-intermesh-user", "user-b").get("/api/v1/account/ACC-BOB/transactions")
+                .then().statusCode(403).body("error", is("Access denied"));
+        assertHistoryCalls(1, 0);
+    }
+
+    @Test
+    void forgedIdentityHeaderDoesNotReplaceVerifiedHistoryOwner() {
+        given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .header("x-intermesh-user", "user-b").get("/api/v1/account/ACC-ALICE/transactions")
+                .then().statusCode(200).body("[0].transaction_id", is("TX-ACC-ALICE"));
+        assertHistoryCalls(1, 1);
+    }
+
+    @Test
+    void ownedAccountWithNoTransactionsReturnsEmptyHistory() {
+        given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/account/ACC-EMPTY/transactions").then().statusCode(200)
+                .body("size()", is(0));
+        assertHistoryCalls(1, 1);
+    }
+
+    @Test
+    void nullLedgerHistoryPreservesExistingEmptyResponse() {
+        given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/account/ACC-NULL-HISTORY/transactions").then().statusCode(200)
+                .body(is(""));
+        assertHistoryCalls(1, 1);
+    }
+
+    @Test
+    void ledgerAccountLookupFailuresPreserveHttpStatusWithoutFetchingHistory() {
+        for (int status : List.of(500, 503)) {
+            resetLedgerCalls();
+            given().header("Authorization", "Bearer " + token(claims("user-a")))
+                    .get("/api/v1/account/ACC-LOOKUP-" + status + "/transactions").then().statusCode(status)
+                    .body("status", is("FAILED")).body("reason", is("Core Ledger request failed."))
+                    .body("size()", is(2));
+            assertHistoryCalls(1, 0);
+        }
+    }
+
+    @Test
+    void ledgerHistoryFailureRemainsADownstreamFailureAfterOwnershipCheck() {
+        given().header("Authorization", "Bearer " + token(claims("user-a")))
+                .get("/api/v1/account/ACC-HISTORY-FAIL/transactions").then().statusCode(503)
+                .body("status", is("FAILED")).body("reason", is("Core Ledger request failed."))
+                .body("size()", is(2));
+        assertHistoryCalls(1, 1);
+    }
+
+    @Test
+    void unusableLedgerAccountResponsesFailClosedWithoutFetchingHistory() {
+        for (String id : List.of("ACC-NULL", "ACC-NO-OWNER", "ACC-BLANK-OWNER", "ACC-WRONG-ID")) {
+            resetLedgerCalls();
+            given().header("Authorization", "Bearer " + token(claims("user-a")))
+                    .get("/api/v1/account/" + id + "/transactions").then().statusCode(502)
+                    .body("status", is("FAILED"))
+                    .body("reason", is("Core Ledger synchronization fault during lookup."));
+            assertHistoryCalls(1, 0);
+        }
+    }
+
+    @Test
+    void historyOwnerComparisonIsExact() {
+        for (String id : List.of("ACC-CASE", "ACC-PADDED")) {
+            resetLedgerCalls();
+            given().header("Authorization", "Bearer " + token(claims("user-a")))
+                    .get("/api/v1/account/" + id + "/transactions").then().statusCode(403);
+            assertHistoryCalls(1, 0);
+        }
     }
 
     @Test

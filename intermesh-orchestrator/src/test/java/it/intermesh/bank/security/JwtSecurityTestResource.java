@@ -33,6 +33,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     private final AtomicInteger ledgerCalls = new AtomicInteger();
     private final AtomicInteger jwksCalls = new AtomicInteger();
     private final AtomicInteger fraudCalls = new AtomicInteger();
+    private final AtomicInteger accountLookups = new AtomicInteger();
+    private final AtomicInteger historyCalls = new AtomicInteger();
+    private final AtomicReference<String> lastLookupAccount = new AtomicReference<>("");
+    private final AtomicReference<String> lastHistoryAccount = new AtomicReference<>("");
     private final AtomicReference<String> lastOwner = new AtomicReference<>("");
     private HttpServer server;
     private URI baseUri;
@@ -58,6 +62,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             server.createContext("/test/reset", exchange -> {
                 ledgerCalls.set(0);
                 fraudCalls.set(0);
+                accountLookups.set(0);
+                historyCalls.set(0);
+                lastLookupAccount.set("");
+                lastHistoryAccount.set("");
                 lastOwner.set("");
                 release.countDown();
                 blocked = new CountDownLatch(0);
@@ -66,7 +74,9 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             });
             server.createContext("/test/ledger-calls", exchange -> respond(exchange, 200,
                     Map.of("count", ledgerCalls.get(), "owner", lastOwner.get(), "jwksCalls", jwksCalls.get(),
-                            "fraudCalls", fraudCalls.get(), "blocked", blocked.getCount() == 0)));
+                            "fraudCalls", fraudCalls.get(), "blocked", blocked.getCount() == 0,
+                            "accountLookups", accountLookups.get(), "historyCalls", historyCalls.get(),
+                            "lookupAccount", lastLookupAccount.get(), "historyAccount", lastHistoryAccount.get())));
             server.createContext("/test/block", exchange -> {
                 blocked = new CountDownLatch(1);
                 release = new CountDownLatch(1);
@@ -163,8 +173,54 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             }
             return;
         }
-        if (path.endsWith("/transactions")) {
-            respond(exchange, 200, List.of());
+        String accountPrefix = "/v1/ledger/account/";
+        if (exchange.getRequestMethod().equals("GET") && path.startsWith(accountPrefix)) {
+            if (path.endsWith("/balance")) {
+                String id = URLDecoder.decode(path.substring(accountPrefix.length(), path.length() - "/balance".length()),
+                        StandardCharsets.UTF_8);
+                accountLookups.incrementAndGet();
+                lastLookupAccount.set(id);
+                if (id.equals("ACC-MISSING")) {
+                    respond(exchange, 404, Map.of("error", "Synthetic upstream detail"));
+                } else if (id.equals("ACC-LOOKUP-500") || id.equals("ACC-LOOKUP-503")) {
+                    respond(exchange, id.endsWith("500") ? 500 : 503, Map.of("error", "Synthetic upstream detail"));
+                } else if (id.equals("ACC-NULL")) {
+                    respond(exchange, 200, null);
+                } else if (id.equals("ACC-NO-OWNER")) {
+                    respond(exchange, 200, Map.of("account_id", id));
+                } else if (id.equals("ACC-WRONG-ID")) {
+                    respond(exchange, 200, account("user-a", "ACC-OTHER"));
+                } else {
+                    String owner = switch (id) {
+                        case "ACC-BOB" -> "user-b";
+                        case "ACC-CASE" -> "User-A";
+                        case "ACC-PADDED" -> " user-a ";
+                        case "ACC-BLANK-OWNER" -> " ";
+                        default -> "user-a";
+                    };
+                    respond(exchange, 200, account(owner, id));
+                }
+                return;
+            }
+            if (path.endsWith("/transactions")) {
+                String id = URLDecoder.decode(path.substring(accountPrefix.length(), path.length() - "/transactions".length()),
+                        StandardCharsets.UTF_8);
+                historyCalls.incrementAndGet();
+                lastHistoryAccount.set(id);
+                if (id.equals("ACC-HISTORY-FAIL")) {
+                    respond(exchange, 503, Map.of("error", "Synthetic upstream detail"));
+                } else if (id.equals("ACC-NULL-HISTORY")) {
+                    respond(exchange, 200, null);
+                } else if (id.equals("ACC-TEST") || id.equals("ACC-EMPTY")) {
+                    respond(exchange, 200, List.of());
+                } else {
+                    respond(exchange, 200, List.of(Map.of("transaction_id", "TX-" + id,
+                            "target_iban", "TEST-TARGET-IBAN", "amount", 12.5, "status", "COMMITTED",
+                            "timestamp", "2026-01-01 12:00:00+00")));
+                }
+                return;
+            }
+            respond(exchange, 500, Map.of("error", "Unexpected Ledger operation"));
             return;
         }
         if (!exchange.getRequestMethod().equals("GET") || !path.startsWith(prefix)) {
@@ -193,8 +249,12 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     }
 
     private Map<String, Object> account(String owner) {
+        return account(owner, "ACC-TEST");
+    }
+
+    private Map<String, Object> account(String owner, String id) {
         return Map.of(
-                "account_id", "ACC-TEST", "user_id", owner, "iban", "TEST-IBAN",
+                "account_id", id, "user_id", owner, "iban", "TEST-IBAN",
                 "holder_name", "Test Account", "balance", 100.0, "frozen_balance", 0.0);
     }
 
