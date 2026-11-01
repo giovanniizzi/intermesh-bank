@@ -21,6 +21,11 @@ type LedgerPayloadDTO struct {
 	Amount        Amount `json:"amount"`
 }
 
+type FreezeResponseDTO struct {
+	Status        string `json:"status"`
+	TransactionID string `json:"transaction_id"`
+}
+
 type TransactionHistoryDTO struct {
 	TransactionID string  `json:"transaction_id"`
 	TargetIBAN    string  `json:"target_iban"`

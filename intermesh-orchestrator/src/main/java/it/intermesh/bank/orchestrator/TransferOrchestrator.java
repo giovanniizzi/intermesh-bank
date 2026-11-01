@@ -2,6 +2,9 @@ package it.intermesh.bank.orchestrator;
 
 import it.intermesh.bank.dto.request.TransferRequestDTO;
 import it.intermesh.bank.dto.response.LedgerTransferResponseDTO;
+import it.intermesh.bank.dto.response.LedgerFreezeResponseDTO;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
 import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import it.intermesh.bank.dto.response.TransferResponseDTO;
@@ -49,6 +52,9 @@ public class TransferOrchestrator {
     @Inject
     BankingSessionGuard sessionGuard;
 
+    @Inject
+    ObjectMapper json;
+
     @POST
     @Path("/transfers")
     @Authenticated
@@ -93,10 +99,27 @@ public class TransferOrchestrator {
             amount
         );
 
+        final String frozenTransactionId;
         try (Response ledgerResp = ledgerClient.freezeFunds(ledgerTxRequest)) {
             if (ledgerResp.getStatus() != Response.Status.OK.getStatusCode()) {
                 return Response.status(Response.Status.BAD_REQUEST)
                         .entity(Map.of("status", "REJECTED", "reason", "Ledger freeze was not acknowledged; financial outcome was not confirmed.")).build();
+            }
+            try {
+                LedgerFreezeResponseDTO acknowledgment = json.readerFor(LedgerFreezeResponseDTO.class)
+                        .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                        .readValue(ledgerResp.readEntity(String.class));
+                if (acknowledgment == null || !"FROZEN".equals(acknowledgment.getStatus())) {
+                    return invalidFreezeAcknowledgment();
+                }
+                frozenTransactionId = acknowledgment.getTransaction_id();
+                if (frozenTransactionId.isBlank()
+                        || frozenTransactionId.codePointCount(0, frozenTransactionId.length()) > 50
+                        || frozenTransactionId.codePoints().anyMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c))) {
+                    return invalidFreezeAcknowledgment();
+                }
+            } catch (Exception e) {
+                return invalidFreezeAcknowledgment();
             }
         } catch (Exception e) {
             LOG.error("[TransferOrchestrator] Ledger freeze outcome was not confirmed.");
@@ -138,6 +161,12 @@ public class TransferOrchestrator {
         TransferResponseDTO responseBody = new TransferResponseDTO(commitResp);
 
         return Response.ok(responseBody).build();
+    }
+
+    private Response invalidFreezeAcknowledgment() {
+        return Response.status(Response.Status.BAD_GATEWAY)
+                .entity(Map.of("status", "FAILED", "reason",
+                        "Ledger freeze acknowledgment was invalid; financial outcome was not confirmed.")).build();
     }
 
     private enum CompensationOutcome {

@@ -49,6 +49,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     private final AtomicInteger fraudStatus = new AtomicInteger(200);
     private final AtomicInteger commitStatus = new AtomicInteger(200);
     private final AtomicInteger unfreezeStatus = new AtomicInteger(200);
+    private final AtomicReference<String> freezeResponseBody = new AtomicReference<>();
     private final Map<String, String> transferResponseModes = new ConcurrentHashMap<>();
     private final AtomicReference<Double> availableBalance = new AtomicReference<>(100.0);
     private final AtomicReference<Double> frozenBalance = new AtomicReference<>(0.0);
@@ -105,6 +106,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 fraudStatus.set(((Number) settings.getOrDefault("fraud", 200)).intValue());
                 commitStatus.set(((Number) settings.getOrDefault("commit", 200)).intValue());
                 unfreezeStatus.set(((Number) settings.getOrDefault("unfreeze", 200)).intValue());
+                freezeResponseBody.set((String) settings.get("freezeBody"));
                 for (String operation : List.of("freeze", "commit", "unfreeze")) {
                     transferResponseModes.put(operation, (String) settings.getOrDefault(operation + "Mode", "normal"));
                 }
@@ -305,6 +307,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
         fraudStatus.set(200);
         commitStatus.set(200);
         unfreezeStatus.set(200);
+        freezeResponseBody.set(null);
         transferResponseModes.clear();
         availableBalance.set(100.0);
         frozenBalance.set(0.0);
@@ -365,7 +368,16 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             exchange.close();
             return;
         }
-        respond(exchange, status, Map.of("status", "COMMITTED", "transaction_id", "TX-TEST"));
+        if (operation.equals("freeze")) {
+            String body = freezeResponseBody.get();
+            if (body != null) {
+                respondBody(exchange, status, body.getBytes(StandardCharsets.UTF_8));
+            } else {
+                respond(exchange, status, Map.of("status", "FROZEN", "transaction_id", "TX-TEST"));
+            }
+        } else {
+            respond(exchange, status, Map.of("status", "COMMITTED", "transaction_id", "TX-TEST"));
+        }
     }
 
     private Map<String, Object> account(String owner, String id) {
@@ -375,7 +387,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     }
 
     private void respond(HttpExchange exchange, int status, Object value) throws IOException {
-        byte[] body = json.writeValueAsBytes(value);
+        respondBody(exchange, status, json.writeValueAsBytes(value));
+    }
+
+    private void respondBody(HttpExchange exchange, int status, byte[] body) throws IOException {
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(status, body.length);
         exchange.getResponseBody().write(body);

@@ -825,6 +825,67 @@ public class AccountLookupSecurityTest {
     }
 
     @Test
+    void unusableFreezeAcknowledgmentsStopWithoutRetryOrCompensation() throws Exception {
+        String jwt = token(claims("user-a"));
+        for (String id : List.of("null", "123", "true", "[]", "{}", "\"\"", "\" \"", "\"\\t\\n\"",
+                "\"TX WITH SPACE\"", "\"TX\\u0000TEST\"", "\"" + "T".repeat(51) + "\"")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of("freezeBody", "{\"status\":\"FROZEN\",\"transaction_id\":" + id + "}"));
+            Response response = transfer("ACC-ALICE", "ACC-BOB", jwt, null);
+            response.then().statusCode(502).body("status", is("FAILED"))
+                    .body("reason", is("Ledger freeze acknowledgment was invalid; financial outcome was not confirmed."))
+                    .body("size()", is(2));
+            assertNoRestorationClaim(response);
+            assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 1, 87.5f, 12.5f);
+        }
+    }
+
+    @Test
+    void invalidFreezeStatusAndMalformedBodiesStopAfterFreeze() {
+        String jwt = token(claims("user-a"));
+        for (String body : List.of(
+                "{\"status\":\"FROZEN\"}",
+                "{\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":\"COMMITTED\",\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":\"frozen\",\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":\"FROZEN \",\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":null,\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":200,\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":true,\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":[],\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":{},\"transaction_id\":\"TX-TEST\"}",
+                "{\"status\":\"FROZEN\",\"tmp_tx_id\":\"TX-TEST\"}",
+                "{", "", "null", "[]", "true", "{}",
+                "{\"status\":\"FROZEN\",\"transaction_id\":\"TX-TEST\"} garbage",
+                "{\"status\":\"FROZEN\",\"transaction_id\":\"TX-TEST\"} {}")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of("freezeBody", body));
+            Response response = transfer("ACC-ALICE", "ACC-BOB", jwt, null);
+            response.then().statusCode(502).body("status", is("FAILED"))
+                    .body("reason", is("Ledger freeze acknowledgment was invalid; financial outcome was not confirmed."))
+                    .body("size()", is(2));
+            assertNoRestorationClaim(response);
+            assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 1, 87.5f, 12.5f);
+        }
+    }
+
+    @Test
+    void opaqueFreezeIdentifiersWithinColumnLimitPreserveExistingCommitContract() throws Exception {
+        String jwt = token(claims("user-a"));
+        for (String id : List.of("TX-IM-1234abcd", "T".repeat(50), "\uD83D\uDE00".repeat(50))) {
+            resetLedgerCalls();
+            String body = new ObjectMapper().writeValueAsString(Map.of("status", "FROZEN", "transaction_id", id));
+            transferOutcomes(Map.of("freezeBody", body));
+            transfer("ACC-ALICE", "ACC-BOB", jwt, null).then().statusCode(200)
+                    .body("ledgerTransferResponseDTO.status", is("COMMITTED"))
+                    .body("ledgerTransferResponseDTO.transaction_id", is("TX-TEST"));
+            assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
+            given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                    .body("transfer.commitRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)));
+        }
+    }
+
+    @Test
     void transferWorkflowFreezeRefusalStopsBeforeFraud() {
         transferOutcomes(Map.of("freeze", 201));
         Response response = transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null);

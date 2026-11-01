@@ -75,7 +75,7 @@ func (h *LedgerHandler) HandleFreeze(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "FROZEN", "tmp_tx_id": txID})
+	json.NewEncoder(w).Encode(dto.FreezeResponseDTO{Status: "FROZEN", TransactionID: txID})
 }
 
 func (h *LedgerHandler) HandleCommit(w http.ResponseWriter, r *http.Request) {
