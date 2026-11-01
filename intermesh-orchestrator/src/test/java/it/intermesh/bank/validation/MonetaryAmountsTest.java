@@ -48,7 +48,7 @@ public class MonetaryAmountsTest {
             TransferRequestDTO request = (TransferRequestDTO) read("{\"amount\":" + tc.token() + "}", TransferRequestDTO.class);
             BigDecimal amount = MonetaryAmounts.require(request.getAmount(), false);
             assertEquals(new BigDecimal(tc.canonical()), amount);
-            var ledger = mapper.readTree(mapper.writeValueAsBytes(new LedgerTransactionRequestDTO("ACC-TEST", amount)));
+            var ledger = mapper.readTree(mapper.writeValueAsBytes(new LedgerTransactionRequestDTO("ACC-TEST", "TEST-IBAN", amount)));
             assertTrue(ledger.path("amount").isNumber());
             assertEquals(0, amount.compareTo(ledger.path("amount").decimalValue()));
             var account = mapper.readTree(mapper.writeValueAsBytes(new LedgerAccountCreationRequestDTO("test-user", "Test", amount)));

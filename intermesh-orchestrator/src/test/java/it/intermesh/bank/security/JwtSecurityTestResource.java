@@ -8,6 +8,8 @@ import com.sun.net.httpserver.HttpServer;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.math.BigDecimal;
+import java.util.UUID;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -51,8 +53,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     private final AtomicInteger unfreezeStatus = new AtomicInteger(200);
     private final AtomicReference<String> freezeResponseBody = new AtomicReference<>();
     private final Map<String, String> transferResponseModes = new ConcurrentHashMap<>();
-    private final AtomicReference<Double> availableBalance = new AtomicReference<>(100.0);
-    private final AtomicReference<Double> frozenBalance = new AtomicReference<>(0.0);
+    private final AtomicReference<BigDecimal> availableBalance = new AtomicReference<>(new BigDecimal("100.00"));
+    private final AtomicReference<BigDecimal> frozenBalance = new AtomicReference<>(new BigDecimal("0.00"));
+    private final Map<String, SyntheticTransaction> transactions = new ConcurrentHashMap<>();
+    private final AtomicReference<String> commitResponseBody = new AtomicReference<>();
     private final List<String> transferCalls = new CopyOnWriteArrayList<>();
     private final AtomicReference<Map<String, Object>> freezeRequest = new AtomicReference<>(Map.of());
     private final AtomicReference<Map<String, Object>> fraudRequest = new AtomicReference<>(Map.of());
@@ -107,6 +111,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 commitStatus.set(((Number) settings.getOrDefault("commit", 200)).intValue());
                 unfreezeStatus.set(((Number) settings.getOrDefault("unfreeze", 200)).intValue());
                 freezeResponseBody.set((String) settings.get("freezeBody"));
+                commitResponseBody.set((String) settings.get("commitBody"));
                 for (String operation : List.of("freeze", "commit", "unfreeze")) {
                     transferResponseModes.put(operation, (String) settings.getOrDefault(operation + "Mode", "normal"));
                 }
@@ -308,9 +313,11 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
         commitStatus.set(200);
         unfreezeStatus.set(200);
         freezeResponseBody.set(null);
+        commitResponseBody.set(null);
+        transactions.clear();
         transferResponseModes.clear();
-        availableBalance.set(100.0);
-        frozenBalance.set(0.0);
+        availableBalance.set(new BigDecimal("100.00"));
+        frozenBalance.set(new BigDecimal("0.00"));
         transferCalls.clear();
         freezeRequest.set(Map.of());
         fraudRequest.set(Map.of());
@@ -323,6 +330,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
         return Map.ofEntries(
                 Map.entry("freezeCalls", freezeCalls.get()), Map.entry("commitCalls", commitCalls.get()),
                 Map.entry("unfreezeCalls", unfreezeCalls.get()), Map.entry("mutationCalls", mutationCalls.get()),
+                Map.entry("transactions", Map.copyOf(transactions)),
                 Map.entry("balance", availableBalance.get()), Map.entry("frozen", frozenBalance.get()),
                 Map.entry("calls", List.copyOf(transferCalls)), Map.entry("freezeRequest", freezeRequest.get()),
                 Map.entry("fraudRequest", fraudRequest.get()), Map.entry("commitRequest", commitRequest.get()),
@@ -334,7 +342,9 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(exchange.getRequestBody());
     }
 
-    private void financialOperation(HttpExchange exchange, String operation) throws IOException {
+    private record SyntheticTransaction(String account_id, BigDecimal amount, String target_iban, String status) {}
+
+    private synchronized void financialOperation(HttpExchange exchange, String operation) throws IOException {
         Map<String, Object> request = readMonetaryRequest(exchange);
         transferCalls.add(operation);
         int status = switch (operation) {
@@ -344,39 +354,76 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             default -> throw new IllegalArgumentException("Unexpected test operation");
         };
         String mode = transferResponseModes.getOrDefault(operation, "normal");
-        if (mode.equals("disconnect-before-mutation")) {
-            exchange.close();
-            return;
+        if (mode.equals("disconnect-before-mutation")) { exchange.close(); return; }
+        if (!(request.get("account_id") instanceof String accountId) || accountId.isBlank()
+                || !(request.get("amount") instanceof Number)) {
+            respond(exchange, 400, Map.of("error", "Invalid transaction reference")); return;
+        }
+        BigDecimal amount = new BigDecimal(request.get("amount").toString());
+        if (amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 2
+                || amount.compareTo(new BigDecimal("9999999999999.99")) > 0) {
+            respond(exchange, 400, Map.of("error", "Invalid monetary amount")); return;
+        }
+        String transactionId;
+        SyntheticTransaction transaction;
+        if (operation.equals("freeze")) {
+            transactionId = "TX-IM-" + UUID.randomUUID();
+            // Valid custom acknowledgments model opaque legacy IDs; malformed
+            // acknowledgments leave the real generated ID unknown to the caller.
+            String customBody = freezeResponseBody.get();
+            if (customBody != null) {
+                try {
+                    var node = json.readTree(customBody).path("transaction_id");
+                    if (node.isTextual() && !node.textValue().isBlank()) transactionId = node.textValue();
+                } catch (Exception ignored) { }
+            }
+            transaction = new SyntheticTransaction(accountId, amount, (String) request.getOrDefault("target_account", ""), "PENDING");
+        } else {
+            if (!(request.get("transaction_id") instanceof String id) || id.isBlank()
+                    || !request.keySet().equals(java.util.Set.of("transaction_id", "account_id", "amount"))) {
+                respond(exchange, 400, Map.of("error", "Invalid transaction reference")); return;
+            }
+            transactionId = id;
+            transaction = transactions.get(id);
+            if (transaction == null || !transaction.account_id().equals(accountId)) {
+                respond(exchange, 404, Map.of("error", "Transaction not found")); return;
+            }
+            if (!transaction.status().equals("PENDING") || transaction.amount().compareTo(amount) != 0
+                    || frozenBalance.get().compareTo(transaction.amount()) < 0) {
+                respond(exchange, 409, Map.of("error", "Transaction conflict")); return;
+            }
         }
         if (status == 200 && !mode.equals("acknowledge-only")) {
-            double amount = ((Number) request.get("amount")).doubleValue();
             mutationCalls.incrementAndGet();
+            BigDecimal recorded = transaction.amount();
             switch (operation) {
                 case "freeze" -> {
-                    availableBalance.updateAndGet(value -> value - amount);
-                    frozenBalance.updateAndGet(value -> value + amount);
+                    availableBalance.updateAndGet(value -> value.subtract(recorded));
+                    frozenBalance.updateAndGet(value -> value.add(recorded));
+                    transactions.put(transactionId, transaction);
                 }
-                case "commit" -> frozenBalance.updateAndGet(value -> value - amount);
+                case "commit" -> {
+                    frozenBalance.updateAndGet(value -> value.subtract(recorded));
+                    transactions.put(transactionId, new SyntheticTransaction(accountId, recorded, transaction.target_iban(), "APPROVED"));
+                }
                 case "unfreeze" -> {
-                    availableBalance.updateAndGet(value -> value + amount);
-                    frozenBalance.updateAndGet(value -> value - amount);
+                    availableBalance.updateAndGet(value -> value.add(recorded));
+                    frozenBalance.updateAndGet(value -> value.subtract(recorded));
+                    transactions.put(transactionId, new SyntheticTransaction(accountId, recorded, transaction.target_iban(), "FAILED"));
                 }
                 default -> throw new IllegalArgumentException("Unexpected test operation");
             }
         }
-        if (mode.equals("disconnect-after-mutation")) {
-            exchange.close();
-            return;
-        }
-        if (operation.equals("freeze")) {
-            String body = freezeResponseBody.get();
-            if (body != null) {
-                respondBody(exchange, status, body.getBytes(StandardCharsets.UTF_8));
-            } else {
-                respond(exchange, status, Map.of("status", "FROZEN", "transaction_id", "TX-TEST"));
-            }
+        if (mode.equals("disconnect-after-mutation")) { exchange.close(); return; }
+        String body = operation.equals("freeze") ? freezeResponseBody.get()
+                : operation.equals("commit") ? commitResponseBody.get() : null;
+        if (body != null) {
+            respondBody(exchange, status, body.getBytes(StandardCharsets.UTF_8));
+        } else if (operation.equals("unfreeze")) {
+            respond(exchange, status, Map.of());
         } else {
-            respond(exchange, status, Map.of("status", "COMMITTED", "transaction_id", "TX-TEST"));
+            respond(exchange, status, Map.of("status", operation.equals("freeze") ? "FROZEN" : "COMMITTED",
+                    "transaction_id", transactionId));
         }
     }
 

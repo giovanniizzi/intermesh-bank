@@ -9,6 +9,7 @@ import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
 import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import it.intermesh.bank.dto.response.TransferResponseDTO;
 import it.intermesh.bank.dto.request.LedgerTransactionRequestDTO;
+import it.intermesh.bank.dto.request.LedgerFinalizationRequestDTO;
 import it.intermesh.bank.dto.request.FraudAnalysisRequestDTO;
 import it.intermesh.bank.restclient.LedgerClient;
 import it.intermesh.bank.restclient.FraudClient;
@@ -66,6 +67,14 @@ public class TransferOrchestrator {
                     .entity(Map.of("error", "Source account is required")).build();
         }
 
+        String targetAccount = transferRequestDTO.getTarget_account();
+        if (targetAccount == null || targetAccount.isBlank()
+                || targetAccount.codePointCount(0, targetAccount.length()) > 34
+                || targetAccount.codePoints().anyMatch(Character::isISOControl)) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Invalid destination account")).build();
+        }
+
         BigDecimal amount = MonetaryAmounts.require(transferRequestDTO.getAmount(), false);
 
         try {
@@ -95,7 +104,8 @@ public class TransferOrchestrator {
         LOG.info("[TransferOrchestrator] Transfer processing requested.");
 
         LedgerTransactionRequestDTO ledgerTxRequest = new LedgerTransactionRequestDTO(
-            transferRequestDTO.getSource_account(), 
+            sourceAccount,
+            targetAccount,
             amount
         );
 
@@ -115,7 +125,7 @@ public class TransferOrchestrator {
                 frozenTransactionId = acknowledgment.getTransaction_id();
                 if (frozenTransactionId.isBlank()
                         || frozenTransactionId.codePointCount(0, frozenTransactionId.length()) > 50
-                        || frozenTransactionId.codePoints().anyMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c))) {
+                        || frozenTransactionId.codePoints().anyMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c) || Character.isISOControl(c))) {
                     return invalidFreezeAcknowledgment();
                 }
             } catch (Exception e) {
@@ -126,6 +136,8 @@ public class TransferOrchestrator {
             return Response.status(Response.Status.GATEWAY_TIMEOUT)
                     .entity(Map.of("status", "FAILED", "reason", "Ledger freeze was not acknowledged; financial outcome was not confirmed.")).build();
         }
+        LedgerFinalizationRequestDTO finalization = new LedgerFinalizationRequestDTO(
+                frozenTransactionId, sourceAccount, amount);
         LOG.info("[TransferOrchestrator] Phase 1 Completed: Funds isolated.");
 
         FraudAnalysisRequestDTO fraudRequest = new FraudAnalysisRequestDTO(
@@ -143,19 +155,41 @@ public class TransferOrchestrator {
         if (!verificationAcknowledged) {
             LOG.warn("[TransferOrchestrator] Transaction verification did not complete; requesting compensation.");
             return buildCompensationResponse("Transaction verification did not complete.",
-                    triggerRollback(ledgerTxRequest));
+                    triggerRollback(finalization));
         }
         LOG.info("[TransferOrchestrator] Phase 2 Completed: Risk scoring clear.");
 
-        LedgerTransferResponseDTO commitResp;
-       
-        try {
-                commitResp = ledgerClient.commitTransaction(ledgerTxRequest);
-            } catch (Exception e) {
-                LOG.error("[TransferOrchestrator] Ledger commit outcome was not confirmed; requesting compensation.");
-                return buildCompensationResponse("Ledger commit outcome was not confirmed.",
-                        triggerRollback(ledgerTxRequest));
+        LedgerTransferResponseDTO commitResp = null;
+        String commitFailure = "Ledger commit outcome was not confirmed.";
+        try (Response response = ledgerClient.commitTransaction(finalization)) {
+            if (response.getStatus() == Response.Status.OK.getStatusCode()) {
+                commitFailure = "Ledger commit acknowledgment was invalid; financial outcome was not confirmed.";
+                try {
+                    commitResp = json.readerFor(LedgerTransferResponseDTO.class)
+                            .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                            .readValue(response.readEntity(String.class));
+                    if (commitResp != null && "COMMITTED".equals(commitResp.getStatus())
+                            && frozenTransactionId.equals(commitResp.getTransaction_id())) {
+                        commitFailure = null;
+                    }
+                } catch (Exception e) {
+                    // The request may have committed even when its acknowledgment is unusable.
+                }
             }
+        } catch (WebApplicationException e) {
+            try (Response rejected = e.getResponse()) {
+                // Close any response carried by the REST client's error mapper.
+            } catch (Exception ignored) {
+                // Response cleanup cannot establish the financial outcome.
+            }
+            commitFailure = "Ledger commit outcome was not confirmed.";
+        } catch (Exception e) {
+            commitFailure = "Ledger commit outcome was not confirmed.";
+        }
+        if (commitFailure != null) {
+            LOG.error("[TransferOrchestrator] Ledger commit was not confirmed; requesting transaction-specific compensation.");
+            return buildCompensationResponse(commitFailure, triggerRollback(finalization));
+        }
 
         LOG.info("[TransferOrchestrator] Outbound transaction completed successfully.");
         TransferResponseDTO responseBody = new TransferResponseDTO(commitResp);
@@ -181,7 +215,7 @@ public class TransferOrchestrator {
         }
     }
 
-    private CompensationOutcome triggerRollback(LedgerTransactionRequestDTO request) {
+    private CompensationOutcome triggerRollback(LedgerFinalizationRequestDTO request) {
         CompensationOutcome outcome;
         try {
             Response response;

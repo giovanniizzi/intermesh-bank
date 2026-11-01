@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"intermesh-ledger/internal/dto"
 	"intermesh-ledger/internal/repository"
@@ -19,7 +20,14 @@ func NewLedgerHandler(repo *repository.AccountRepository) *LedgerHandler {
 }
 
 func decodeWrite(w http.ResponseWriter, r *http.Request, payload any) error {
+	return decodeJSONWrite(w, r, payload, false)
+}
+
+func decodeJSONWrite(w http.ResponseWriter, r *http.Request, payload any, strict bool) error {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
 	if err := decoder.Decode(payload); err != nil {
 		return err
 	}
@@ -78,35 +86,44 @@ func (h *LedgerHandler) HandleFreeze(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(dto.FreezeResponseDTO{Status: "FROZEN", TransactionID: txID})
 }
 
-func (h *LedgerHandler) HandleCommit(w http.ResponseWriter, r *http.Request) {
-	var payload dto.LedgerPayloadDTO
-	if err := decodeWrite(w, r, &payload); err != nil || !payload.Amount.Valid(false) {
-		invalidMonetaryRequest(w)
-		return
+func finalizationError(w http.ResponseWriter, err error) {
+	status, message := http.StatusInternalServerError, "Database processing error"
+	switch {
+	case errors.Is(err, repository.ErrInvalidTransactionReference):
+		status, message = http.StatusBadRequest, "Invalid transaction reference"
+	case errors.Is(err, repository.ErrTransactionNotFound):
+		status, message = http.StatusNotFound, "Transaction not found"
+	case errors.Is(err, repository.ErrTransactionConflict):
+		status, message = http.StatusConflict, "Transaction conflict"
 	}
-
-	txID, err := h.Repo.CommitTransaction(payload)
-	if err != nil {
-		log.Printf("[Ledger Error] Commit balance update failed: %v\n", err)
-		http.Error(w, "Database processing error", http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "COMMITTED", "transaction_id": txID})
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+func (h *LedgerHandler) HandleCommit(w http.ResponseWriter, r *http.Request) {
+	var ref dto.TransactionReference
+	if err := decodeJSONWrite(w, r, &ref, true); err != nil || !ref.Valid() {
+		finalizationError(w, repository.ErrInvalidTransactionReference)
+		return
+	}
+	id, err := h.Repo.CommitReferencedTransaction(ref)
+	if err != nil {
+		finalizationError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "COMMITTED", "transaction_id": id})
 }
 
 func (h *LedgerHandler) HandleUnfreeze(w http.ResponseWriter, r *http.Request) {
-	var payload dto.LedgerPayloadDTO
-	if err := decodeWrite(w, r, &payload); err != nil || !payload.Amount.Valid(false) {
-		invalidMonetaryRequest(w)
+	var ref dto.TransactionReference
+	if err := decodeJSONWrite(w, r, &ref, true); err != nil || !ref.Valid() {
+		finalizationError(w, repository.ErrInvalidTransactionReference)
 		return
 	}
-
-	err := h.Repo.RollbackTransaction(payload)
-	if err != nil {
-		log.Printf("[Ledger Error] Unfreeze balance update failed: %v\n", err)
-		http.Error(w, "Database processing error", http.StatusInternalServerError)
+	if err := h.Repo.RollbackReferencedTransaction(ref); err != nil {
+		finalizationError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)

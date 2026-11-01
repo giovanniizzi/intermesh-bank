@@ -1,6 +1,7 @@
 package it.intermesh.bank.restclient;
 
 import it.intermesh.bank.dto.request.LedgerTransactionRequestDTO;
+import it.intermesh.bank.dto.request.LedgerFinalizationRequestDTO;
 import it.intermesh.bank.dto.request.LedgerAccountCreationRequestDTO;
 import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
 import it.intermesh.bank.dto.response.LedgerTransferResponseDTO;
@@ -28,11 +29,11 @@ public interface LedgerClient {
 
     @POST
     @Path("/unfreeze")
-    Response unfreezeFunds(LedgerTransactionRequestDTO request);
+    Response unfreezeFunds(LedgerFinalizationRequestDTO request);
 
     @POST
     @Path("/commit")
-    LedgerTransferResponseDTO commitTransaction(LedgerTransactionRequestDTO request);
+    Response commitTransaction(LedgerFinalizationRequestDTO request);
 
     @POST
     @Path("/accounts")

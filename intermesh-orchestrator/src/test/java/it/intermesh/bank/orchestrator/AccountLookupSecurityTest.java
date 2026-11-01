@@ -788,6 +788,21 @@ public class AccountLookupSecurityTest {
         response.then().statusCode(504).body("status", is("FAILED"))
                 .body("reason", is(failure + " " + compensation)).body("size()", is(2));
         assertNoRestorationClaim(response);
+        assertFinalizationMatchesFrozenTransaction("unfreezeRequest");
+    }
+
+    private void assertFinalizationMatchesFrozenTransaction(String requestName) {
+        var transfer = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls")
+                .then().statusCode(200).extract().jsonPath();
+        String id = transfer.getString("transfer." + requestName + ".transaction_id");
+        Map<String, Map<String, Object>> transactions = transfer.getMap("transfer.transactions");
+        assertEquals(1, transactions.size());
+        assertTrue(transactions.containsKey(id));
+        assertEquals(transfer.getString("transfer.freezeRequest.account_id"),
+                transfer.getString("transfer." + requestName + ".account_id"));
+        assertEquals(transfer.getString("transfer.freezeRequest.amount"),
+                transfer.getString("transfer." + requestName + ".amount"));
+        assertEquals(transfer.getString("transfer.freezeRequest.target_account"), transactions.get(id).get("target_iban"));
     }
 
     private void assertNoRestorationClaim(Response response) {
@@ -813,13 +828,14 @@ public class AccountLookupSecurityTest {
 
     @Test
     void transferWorkflowSuccessPreservesRequestsAndResponse() {
-        transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(200)
+        String transactionId = transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null).then().statusCode(200)
                 .body("ledgerTransferResponseDTO.status", is("COMMITTED"))
-                .body("ledgerTransferResponseDTO.transaction_id", is("TX-TEST"));
+                .extract().path("ledgerTransferResponseDTO.transaction_id");
+        assertTrue(transactionId.startsWith("TX-IM-"));
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
         given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
-                .body("transfer.freezeRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)))
-                .body("transfer.commitRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)))
+                .body("transfer.freezeRequest", is(Map.of("account_id", "ACC-ALICE", "target_account", "ACC-BOB", "amount", 12.5f)))
+                .body("transfer.commitRequest", is(Map.of("transaction_id", transactionId, "account_id", "ACC-ALICE", "amount", 12.5f)))
                 .body("transfer.fraudRequest", is(Map.of("source_account", "ACC-ALICE",
                         "target_account", "ACC-BOB", "amount", 12.5f)));
     }
@@ -870,7 +886,7 @@ public class AccountLookupSecurityTest {
     }
 
     @Test
-    void opaqueFreezeIdentifiersWithinColumnLimitPreserveExistingCommitContract() throws Exception {
+    void opaqueFreezeIdentifiersWithinColumnLimitReachCommitUnchanged() throws Exception {
         String jwt = token(claims("user-a"));
         for (String id : List.of("TX-IM-1234abcd", "T".repeat(50), "\uD83D\uDE00".repeat(50))) {
             resetLedgerCalls();
@@ -878,11 +894,126 @@ public class AccountLookupSecurityTest {
             transferOutcomes(Map.of("freezeBody", body));
             transfer("ACC-ALICE", "ACC-BOB", jwt, null).then().statusCode(200)
                     .body("ledgerTransferResponseDTO.status", is("COMMITTED"))
-                    .body("ledgerTransferResponseDTO.transaction_id", is("TX-TEST"));
+                    .body("ledgerTransferResponseDTO.transaction_id", is(id));
             assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
             given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
-                    .body("transfer.commitRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)));
+                    .body("transfer.commitRequest", is(Map.of("transaction_id", id, "account_id", "ACC-ALICE", "amount", 12.5f)));
         }
+    }
+
+    @Test
+    void malformedCommitAcknowledgmentsNeverReportSuccessOrCompensateAnotherTransaction() {
+        String jwt = token(claims("user-a"));
+        for (String body : List.of("", "{", "null", "[]", "true", "{}",
+                "{\"status\":\"COMMITTED\"}",
+                "{\"transaction_id\":\"WRONG-ID\"}",
+                "{\"status\":\"COMMITTED\",\"transaction_id\":\"WRONG-ID\"}",
+                "{\"status\":\"APPROVED\",\"transaction_id\":\"TX-KNOWN\"}",
+                "{\"status\":\"committed\",\"transaction_id\":\"TX-KNOWN\"}",
+                "{\"status\":\"COMMITTED \",\"transaction_id\":\"TX-KNOWN\"}",
+                "{\"status\":200,\"transaction_id\":\"WRONG-ID\"}",
+                "{\"status\":\"COMMITTED\",\"transaction_id\":123}",
+                "{\"status\":\"COMMITTED\",\"transaction_id\":null}",
+                "{\"status\":\"COMMITTED\",\"transaction_id\":\"TX-KNOWN\"} {}",
+                "{\"status\":\"COMMITTED\",\"transaction_id\":\"TX-KNOWN\"} garbage")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of("commitBody", body, "freezeBody", "{\"status\":\"FROZEN\",\"transaction_id\":\"TX-KNOWN\"}"));
+            assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", jwt, null),
+                    "Ledger commit acknowledgment was invalid; financial outcome was not confirmed.",
+                    "Unfreeze request failed; restoration was not confirmed.");
+            assertTransferState(compensationCalls("commit"), 2, 87.5f, 0.0f);
+            assertFinalizationMatchesFrozenTransaction("commitRequest");
+        }
+    }
+
+    @Test
+    void malformedCommitAcknowledgmentWithPendingTransactionAllowsScopedCompensation() {
+        transferOutcomes(Map.of("commitMode", "acknowledge-only", "commitBody", "{}"));
+        assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                "Ledger commit acknowledgment was invalid; financial outcome was not confirmed.",
+                "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
+        assertTransferState(compensationCalls("commit"), 2, 100.0f, 0.0f);
+    }
+
+    @Test
+    void destinationIsPreservedWithoutTruncationOrSettlement() {
+        String jwt = token(claims("user-a"));
+        for (String destination : List.of("TEST-IBAN-123", "T".repeat(34))) {
+            resetLedgerCalls();
+            String id = transfer("ACC-ALICE", destination, jwt, null).then().statusCode(200)
+                    .extract().path("ledgerTransferResponseDTO.transaction_id");
+            var snapshot = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                    .statusCode(200).extract().jsonPath();
+            Map<String, Map<String, Object>> transactions = snapshot.getMap("transfer.transactions");
+            assertEquals(destination, transactions.get(id).get("target_iban"));
+            assertFinalizationMatchesFrozenTransaction("commitRequest");
+            assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
+        }
+        for (String destination : List.of("", " ", "T".repeat(35), "IBAN\u0000")) {
+            resetLedgerCalls();
+            transfer("ACC-ALICE", destination, jwt, null).then().statusCode(400);
+            assertTransferState(List.of(), 0, 100.0f, 0.0f);
+        }
+    }
+
+    @Test
+    void twoPendingTransfersFinalizeIndependentlyAndRejectInvalidReferences() {
+        String jwt = token(claims("user-a"));
+        transferOutcomes(Map.of("fraud", 503, "unfreezeMode", "acknowledge-only"));
+        String[] ids = new String[2];
+        for (int i = 0; i < 2; i++) {
+            transfer("ACC-ALICE", "ACC-BOB", jwt, null).then().statusCode(504);
+            ids[i] = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls")
+                    .then().extract().path("transfer.unfreezeRequest.transaction_id");
+        }
+        assertNotEquals(ids[0], ids[1]);
+        transferOutcomes(Map.of());
+        Map<String, Object> a = Map.of("transaction_id", ids[0], "account_id", "ACC-ALICE", "amount", new BigDecimal("12.50"));
+        Map<String, Object> b = Map.of("transaction_id", ids[1], "account_id", "ACC-ALICE", "amount", new BigDecimal("12.50"));
+        for (String endpoint : List.of("commit", "unfreeze")) {
+            given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON)
+                    .body(Map.of("account_id", "ACC-ALICE", "amount", 12.5))
+                    .post("/v1/ledger/" + endpoint).then().statusCode(400);
+            given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON)
+                    .body(Map.of("transaction_id", "UNKNOWN", "account_id", "ACC-ALICE", "amount", 12.5))
+                    .post("/v1/ledger/" + endpoint).then().statusCode(404);
+            given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON)
+                    .body(Map.of("transaction_id", ids[0], "account_id", "ACC-BOB", "amount", 12.5))
+                    .post("/v1/ledger/" + endpoint).then().statusCode(404);
+            given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON)
+                    .body(Map.of("transaction_id", ids[0], "account_id", "ACC-ALICE", "amount", 12.51))
+                    .post("/v1/ledger/" + endpoint).then().statusCode(409);
+        }
+        assertSyntheticTransactions(ids[0], "PENDING", ids[1], "PENDING", 75.0f, 25.0f);
+        given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON).body(a)
+                .post("/v1/ledger/commit").then().statusCode(200).body("transaction_id", is(ids[0]));
+        assertSyntheticTransactions(ids[0], "APPROVED", ids[1], "PENDING", 75.0f, 12.5f);
+        given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON).body(b)
+                .post("/v1/ledger/unfreeze").then().statusCode(200);
+        for (String endpoint : List.of("commit", "unfreeze")) {
+            for (Map<String, Object> ref : List.of(a, b)) {
+                given().baseUri(fixtureUri.toString()).contentType(ContentType.JSON).body(ref)
+                        .post("/v1/ledger/" + endpoint).then().statusCode(409);
+            }
+        }
+        assertSyntheticTransactions(ids[0], "APPROVED", ids[1], "FAILED", 87.5f, 0.0f);
+    }
+
+    private void assertSyntheticTransactions(String a, String statusA, String b, String statusB, float balance, float frozen) {
+        var state = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.balance", is(balance)).body("transfer.frozen", is(frozen)).extract().jsonPath();
+        Map<String, Map<String, Object>> transactions = state.getMap("transfer.transactions");
+        assertEquals(statusA, transactions.get(a).get("status"));
+        assertEquals(statusB, transactions.get(b).get("status"));
+    }
+
+    @Test
+    void fraudGatewayTimeoutCompensatesOnlyTheFrozenTransaction() {
+        transferOutcomes(Map.of("fraud", 504));
+        assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null),
+                "Transaction verification did not complete.",
+                "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 2, 100.0f, 0.0f);
     }
 
     @Test
@@ -916,7 +1047,10 @@ public class AccountLookupSecurityTest {
                 "Unfreeze request acknowledged by Ledger; restoration was not independently verified.");
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "unfreeze"), 2, 100.0f, 0.0f);
         given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
-                .body("transfer.unfreezeRequest", is(Map.of("account_id", "ACC-ALICE", "amount", 12.5f)));
+                .body("transfer.unfreezeRequest.account_id", is("ACC-ALICE"))
+                .body("transfer.unfreezeRequest.amount", is(12.5f))
+                .body("transfer.unfreezeRequest.size()", is(3));
+        assertFinalizationMatchesFrozenTransaction("unfreezeRequest");
     }
 
     @Test
@@ -1037,7 +1171,7 @@ public class AccountLookupSecurityTest {
             transferOutcomes(Map.of("commitMode", "disconnect-after-mutation",
                     "unfreeze", mode.equals("explicit-failure") ? 503 : 200, "unfreezeMode", mode));
             String compensation = switch (mode) {
-                case "acknowledge-only" -> "Unfreeze request acknowledged by Ledger; restoration was not independently verified.";
+                case "acknowledge-only" -> "Unfreeze request failed; restoration was not confirmed.";
                 case "explicit-failure" -> "Unfreeze request failed; restoration was not confirmed.";
                 default -> "Unfreeze outcome is unknown; restoration was not confirmed.";
             };

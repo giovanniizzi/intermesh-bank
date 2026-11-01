@@ -61,7 +61,7 @@ func TestMonetaryWriteValidation(t *testing.T) {
 					state, db, handler := testLedger(t)
 					defer db.Close()
 					response := serveWrite(handler, endpoint, body)
-					if response.Code != http.StatusBadRequest || strings.TrimSpace(response.Body.String()) != `{"error":"Invalid monetary request"}` {
+					if response.Code != http.StatusBadRequest || strings.TrimSpace(response.Body.String()) != map[bool]string{true: `{"error":"Invalid transaction reference"}`, false: `{"error":"Invalid monetary request"}`}[endpoint == "commit" || endpoint == "unfreeze"] {
 						t.Fatalf("expected sanitized 400, got %d %s", response.Code, response.Body.String())
 					}
 					if state.calls != 0 {
@@ -74,7 +74,7 @@ func TestMonetaryWriteValidation(t *testing.T) {
 }
 
 func TestValidMonetaryWritesUseExactSQLParameters(t *testing.T) {
-	for _, endpoint := range []string{"accounts", "freeze", "commit", "unfreeze"} {
+	for _, endpoint := range []string{"accounts", "freeze"} {
 		cases := append([]monetaryCase{}, validAmounts...)
 		field := "amount"
 		if endpoint == "accounts" {
@@ -104,6 +104,21 @@ func TestValidMonetaryWritesUseExactSQLParameters(t *testing.T) {
 					if amount != tc.canonical {
 						t.Fatalf("inexact SQL parameter: %q, expected %q", amount, tc.canonical)
 					}
+				}
+			})
+		}
+	}
+}
+
+func TestLegacyFinalizationCannotMutateWithoutTransactionReference(t *testing.T) {
+	for _, endpoint := range []string{"commit", "unfreeze"} {
+		for _, tc := range validAmounts {
+			t.Run(endpoint+"/"+tc.token, func(t *testing.T) {
+				state, db, handler := testLedger(t)
+				defer db.Close()
+				response := serveWrite(handler, endpoint, monetaryBody("amount", tc.token))
+				if response.Code != http.StatusBadRequest || state.calls != 0 {
+					t.Fatalf("legacy finalization must fail closed without SQL: status=%d calls=%d", response.Code, state.calls)
 				}
 			})
 		}

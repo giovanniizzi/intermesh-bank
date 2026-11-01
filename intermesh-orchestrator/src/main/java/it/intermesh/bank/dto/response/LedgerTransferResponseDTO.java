@@ -1,5 +1,8 @@
 package it.intermesh.bank.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 @RegisterForReflection
@@ -7,11 +10,14 @@ public class LedgerTransferResponseDTO {
     private String status;
     private String transaction_id;
 
-    public LedgerTransferResponseDTO() {}
-
-    public LedgerTransferResponseDTO(String status, String transactionId) {
-        this.status = status;
-        this.transaction_id = transactionId;
+    @JsonCreator
+    public LedgerTransferResponseDTO(@JsonProperty("status") JsonNode status,
+            @JsonProperty("transaction_id") JsonNode transactionId) {
+        if (status == null || !status.isTextual() || transactionId == null || !transactionId.isTextual()) {
+            throw new IllegalArgumentException("Invalid commit acknowledgment");
+        }
+        this.status = status.textValue();
+        this.transaction_id = transactionId.textValue();
     }
 
     public String getStatus() { return status; }
