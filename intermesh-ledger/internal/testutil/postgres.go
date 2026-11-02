@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"github.com/lib/pq"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +19,14 @@ var schemaSerial atomic.Uint64
 
 // Opt in only to a disposable local Unix-socket cluster. Never use DATABASE_URL.
 func Postgres(t *testing.T) *sql.DB {
+	t.Helper()
+	db := PostgresBeforeTransferRequests(t)
+	ApplyTransferRequestsMigration(t, db)
+	return db
+}
+
+// PostgresBeforeTransferRequests loads only the bootstrap schema, without demo data.
+func PostgresBeforeTransferRequests(t *testing.T) *sql.DB {
 	t.Helper()
 	socket := os.Getenv("INTERMESH_TEST_POSTGRES_SOCKET_DIR")
 	if socket == "" {
@@ -46,18 +56,36 @@ func Postgres(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	db.SetMaxOpenConns(8)
-	// Column definitions mirror sql/001.sql and sql/002.sql; no project fixtures.
-	if _, err := db.Exec(`CREATE TABLE intermesh_accounts (
-		account_id VARCHAR(50) PRIMARY KEY, user_id VARCHAR(50) NOT NULL,
-		iban VARCHAR(34) NOT NULL UNIQUE, holder_name VARCHAR(100) NOT NULL,
-		balance NUMERIC(15,2) NOT NULL DEFAULT 0.00,
-		frozen_balance NUMERIC(15,2) NOT NULL DEFAULT 0.00);
-		CREATE TABLE intermesh_transactions (
-		transaction_id VARCHAR(50) PRIMARY KEY,
-		source_account_id VARCHAR(50) REFERENCES intermesh_accounts(account_id),
-		target_iban VARCHAR(34) NOT NULL, amount NUMERIC(15,2) NOT NULL,
-		status VARCHAR(20) NOT NULL, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+	accounts, _, found := strings.Cut(readSQL(t, "001.sql"), "INSERT INTO intermesh_accounts")
+	if !found {
+		t.Fatal("bootstrap account schema/demo-data boundary not found")
+	}
+	// search_path contains only this disposable schema, never public.
+	if _, err := db.Exec(accounts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(readSQL(t, "002.sql")); err != nil {
 		t.Fatal(err)
 	}
 	return db
+}
+
+func ApplyTransferRequestsMigration(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(readSQL(t, "003-transfer-requests.sql")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readSQL(t *testing.T, name string) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate SQL test fixtures")
+	}
+	content, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../../sql", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
