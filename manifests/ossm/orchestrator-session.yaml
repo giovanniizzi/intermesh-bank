@@ -30,7 +30,7 @@ spec:
                 kind: Gateway
                 metadata:
                   name: east-west-https-gateway
-                  namespace: istio-ingress
+                  namespace: istio-east-west
                 spec:
                   selector:
                     istio: eastwestgateway
