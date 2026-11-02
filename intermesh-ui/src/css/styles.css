@@ -60,6 +60,15 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-primary); co
 .btn-primary:hover { background-color: var(--primary-hover); }
 .btn-success { background-color: var(--success); color: white; }
 .btn-success:hover { background-color: var(--success-hover); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.transfer-recovery { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color); }
+.transfer-recovery label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 13px; }
+.transfer-recovery select { width: 100%; padding: 10px; font: inherit; border: 1px solid var(--border-color); border-radius: 8px; }
+.transfer-details { margin: 12px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.transfer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.transfer-actions .btn { padding: 10px 12px; font-size: 12px; }
+.transfer-help { color: var(--text-muted); font-size: 12px; line-height: 1.5; margin-top: 12px; }
+#transferStatus { line-height: 1.5; overflow-wrap: anywhere; }
 .account-badge { margin-top: 16px; background-color: #eff6ff; border: 1px solid #bfdbfe; padding: 12px; border-radius: 8px; font-size: 13px; }
 
 /* Audit Data Tables */
