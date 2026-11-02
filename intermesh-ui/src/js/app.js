@@ -108,7 +108,12 @@ async function checkExistingAccount(userID) {
             }
             
             // Aggiorniamo il box informativo per dare il benvenuto
-            onboardingTarget.innerHTML = `<strong>Welcome Back ${accountData.holder_name}!</strong><br><strong>Account Number:</strong> ${activeAccountID}<br><strong>IBAN:</strong> ${accountData.iban}<br><strong>Live Balance:</strong> €${accountData.balance.toFixed(2)}`;
+            onboardingTarget.replaceChildren(
+                textElement('strong', `Welcome Back ${accountData.holder_name}!`), document.createElement('br'),
+                textElement('strong', 'Account Number:'), document.createTextNode(` ${activeAccountID}`), document.createElement('br'),
+                textElement('strong', 'IBAN:'), document.createTextNode(` ${accountData.iban}`), document.createElement('br'),
+                textElement('strong', 'Balance snapshot (reload to update):'), document.createTextNode(` €${accountData.balance.toFixed(2)}`)
+            );
             onboardingTarget.classList.remove('hidden');
             
             // Facciamo partire il polling automatico per mostrare i movimenti nel Ledger
@@ -218,7 +223,10 @@ function setupEventListeners() {
             activeAccountID = accountDetails.account_id;
 
             sourceAccountInput.value = activeAccountID; // Valorizzazione immediata del campo bonifico dopo la creazione
-            onboardingTarget.innerHTML = `<strong>Active Account Provisioned:</strong> ${activeAccountID} <br> <strong>IBAN:</strong> ${accountDetails.iban}`;
+            onboardingTarget.replaceChildren(
+                textElement('strong', 'Active Account Provisioned:'), document.createTextNode(` ${activeAccountID} `),
+                document.createElement('br'), textElement('strong', 'IBAN:'), document.createTextNode(` ${accountDetails.iban}`)
+            );
             onboardingTarget.classList.remove('hidden');
             
             renderTransferState();
@@ -375,20 +383,40 @@ async function runTransferAction(action) {
     }
 }
 
+function textElement(tag, text) {
+    const element = document.createElement(tag);
+    element.textContent = text;
+    return element;
+}
+
 function renderHistoryTable(transactions) {
+    historyTableBody.replaceChildren();
     if (!transactions || transactions.length === 0) {
-        historyTableBody.innerHTML = `<tr><td colspan="5" class="empty-state">No transactions recorded yet for this asset.</td></tr>`;
+        const row = document.createElement('tr');
+        const cell = textElement('td', 'No transactions recorded yet for this asset.');
+        cell.colSpan = 5;
+        cell.className = 'empty-state';
+        row.append(cell);
+        historyTableBody.append(row);
         return;
     }
-    historyTableBody.innerHTML = transactions.map(tx => `
-        <tr>
-            <td><strong>${tx.transaction_id}</strong></td>
-            <td><code>${tx.target_iban}</code></td>
-            <td><strong>€${tx.amount.toFixed(2)}</strong></td>
-            <td><span class="status-pill ${tx.status.toLowerCase()}">${tx.status}</span></td>
-            <td><small>${tx.timestamp}</small></td>
-        </tr>
-    `).join('');
+    for (const tx of transactions) {
+        const row = document.createElement('tr');
+        const fields = [['strong', tx.transaction_id], ['code', tx.target_iban],
+            ['strong', `€${tx.amount.toFixed(2)}`], ['span', tx.status], ['small', tx.timestamp]];
+        for (const [tag, text] of fields) {
+            const cell = document.createElement('td');
+            const content = textElement(tag, text);
+            if (tag === 'span') {
+                const status = String(tx.status).toLowerCase();
+                content.className = ['pending', 'approved', 'failed'].includes(status)
+                    ? `status-pill ${status}` : 'status-pill';
+            }
+            cell.append(content);
+            row.append(cell);
+        }
+        historyTableBody.append(row);
+    }
 }
 
 function showToast(message, type) {

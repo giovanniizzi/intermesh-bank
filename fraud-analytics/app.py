@@ -26,12 +26,11 @@ async def analyze_transaction(
             detail="Security Context Violation: Missing required structural routing headers."
         )
 
-    logging.info(f"Security Context Validated. Channel: {x_intermesh_channel} | Class: {x_intermesh_route_class}")
-    logging.info(f"Analyzing risk score for transaction of €{payload.amount} towards {payload.target_account}")
+    logging.info("Analyzing transaction risk.")
 
     # CONDITIONAL LATENCY: Simulate deeper AML/Fraud checks for foreign accounts (e.g., German IBAN)
     if payload.target_account.startswith("DE"):
-        logging.info("Foreign account detected (Extra-SEPA). Triggering deep AI risk assessment compliance loop...")
+        logging.info("Running extended risk assessment.")
         time.sleep(4.0)
     else:
         # Fast-track path for domestic transactions

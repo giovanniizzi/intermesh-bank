@@ -35,9 +35,6 @@ public class HelloOrchestrator {
 
         String message = hello();
 
-        String cookieHeader = routingContext.request().getHeader("Cookie");
-        System.out.println("Cookie received: " + cookieHeader);
-
         synchronized (session) {
             if (session.isDestroyed()) {
                 return message + "Session expired.";
@@ -74,16 +71,7 @@ public class HelloOrchestrator {
     @Produces(MediaType.TEXT_PLAIN)
     public String helloTo(@PathParam("city") String city,
                           @PathParam("year") int year,
-                          @PathParam("userId") String userId,
-                          @Context RoutingContext routingContext) {
-        routingContext.request()
-            .headers()
-            .forEach(
-                header 
-                -> 
-                System.out.println("Header: " + header.getKey() + " = " + header.getValue())
-            );
-
+                          @PathParam("userId") String userId) {
         return "Hello from " + podName + " in " + networkName + " to user " + userId + " in " + city + " in year " + year + "!";
     }
 }
