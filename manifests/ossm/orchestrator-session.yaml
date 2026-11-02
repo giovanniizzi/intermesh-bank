@@ -45,25 +45,26 @@ spec:
                         - intermesh-orchestrator.session.intermesh.com
                         - '*.intermesh-orchestrator.intermesh-backend.svc.cluster.local'
             - complianceType: musthave
-              apiVersion: networking.istio.io/v1
-              kind: VirtualService
-              metadata:
-                name: quarkus-eastwest-vs
-                namespace: istio-east-west
-              spec:
-                gateways:
-                  - east-west-https-gateway
-                hosts:
-                  - intermesh-orchestrator.session.intermesh.com
-                http:
-                  - match:
-                      - uri:
-                          prefix: /api
-                    route:
-                      - destination:
-                          host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
-                          port:
-                            number: 80
+              objectDefinition:
+                apiVersion: networking.istio.io/v1
+                kind: VirtualService
+                metadata:
+                  name: quarkus-eastwest-vs
+                  namespace: istio-east-west
+                spec:
+                  gateways:
+                    - east-west-https-gateway
+                  hosts:
+                    - intermesh-orchestrator.session.intermesh.com
+                  http:
+                    - match:
+                        - uri:
+                            prefix: /api
+                      route:
+                        - destination:
+                            host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
+                            port:
+                              number: 80
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

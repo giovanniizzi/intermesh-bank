@@ -82,11 +82,11 @@ spec:
         labelSelector:
           matchLabels:
             ossm-enabled: "true"
-      tolerations:
-        - key: cluster.open-cluster-management.io/unavailable
-          operator: Exists
-        - key: cluster.open-cluster-management.io/unreachable
-          operator: Exists
+  tolerations:
+    - key: cluster.open-cluster-management.io/unavailable
+      operator: Exists
+    - key: cluster.open-cluster-management.io/unreachable
+      operator: Exists
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

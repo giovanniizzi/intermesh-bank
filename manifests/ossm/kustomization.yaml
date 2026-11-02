@@ -5,3 +5,4 @@ kind: Kustomization
 resources:
   - istio-gateway.yaml
   - acm-fraud-analytics-vs.yaml
+  - orchestrator-session.yaml
