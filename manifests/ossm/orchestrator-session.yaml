@@ -65,32 +65,15 @@ spec:
                           port:
                             number: 80
 ---
-apiVersion: cluster.open-cluster-management.io/v1beta1
-kind: Placement
-metadata:
-  name: placement-all-clusters
-  namespace: open-cluster-management-policies
-spec:
-  predicates:
-    - requiredClusterSelector:
-        labelSelector:
-          matchLabels:
-            ossm-enabled: "true"
-      tolerations:
-        - key: cluster.open-cluster-management.io/unavailable
-          operator: Exists
-        - key: cluster.open-cluster-management.io/unreachable
-          operator: Exists
----
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
 metadata:
-  name: binding-istio-cross-gateway
+  name: binding-orchestrator-session
   namespace: open-cluster-management-policies
 subjects:
   - apiGroup: policy.open-cluster-management.io
     kind: Policy
-    name: istio-gateway
+    name: orchestrator-session
 placementRef:
   apiGroup: cluster.open-cluster-management.io
   kind: Placement
