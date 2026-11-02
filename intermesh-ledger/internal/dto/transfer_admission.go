@@ -11,6 +11,10 @@ type TransferRequestID string
 
 var transferRequestUUID = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+func (id TransferRequestID) Valid() bool {
+	return transferRequestUUID.MatchString(string(id))
+}
+
 // VerifiedTransferIdentity must be constructed by a trusted authentication boundary,
 // never by decoding identity fields supplied by a browser.
 type VerifiedTransferIdentity struct {
@@ -33,7 +37,7 @@ type TransferIntent struct {
 }
 
 func (i TransferIntent) Valid() bool {
-	return transferRequestUUID.MatchString(string(i.RequestID)) && validReferenceID(i.SourceAccountID) &&
+	return i.RequestID.Valid() && validReferenceID(i.SourceAccountID) &&
 		validAdmissionText(i.Destination, 34) && i.Amount.Valid(false)
 }
 
