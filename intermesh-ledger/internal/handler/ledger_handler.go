@@ -63,29 +63,6 @@ func (h *LedgerHandler) HandleCreateAccount(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(status)
 }
 
-func (h *LedgerHandler) HandleFreeze(w http.ResponseWriter, r *http.Request) {
-	var payload dto.LedgerPayloadDTO
-	if err := decodeWrite(w, r, &payload); err != nil || !payload.Amount.Valid(false) {
-		invalidMonetaryRequest(w)
-		return
-	}
-
-	txID, err := h.Repo.FreezeFunds(payload)
-	if err != nil {
-		log.Printf("[Ledger Error] Freeze balance query failed: %v\n", err)
-		if err.Error() == "insufficient_funds_or_invalid_account" {
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			w.Write([]byte(`{"error":"Insufficient liquidity"}`))
-			return
-		}
-		http.Error(w, "Database processing error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(dto.FreezeResponseDTO{Status: "FROZEN", TransactionID: txID})
-}
-
 func finalizationError(w http.ResponseWriter, err error) {
 	status, message := http.StatusInternalServerError, "Database processing error"
 	switch {

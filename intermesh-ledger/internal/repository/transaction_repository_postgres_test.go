@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -43,7 +44,13 @@ func seedAccount(t *testing.T, db *sql.DB, id, balance string) {
 func freezeReference(t *testing.T, repo *AccountRepository, account, amount string) dto.TransactionReference {
 	t.Helper()
 	value := exactAmount(t, amount)
-	id, err := repo.FreezeFunds(dto.LedgerPayloadDTO{AccountID: account, TargetAccount: "TEST-DESTINATION", Amount: value})
+	var requestID dto.TransferRequestID
+	if err := repo.db.QueryRow("SELECT gen_random_uuid()::text").Scan(&requestID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := repo.AdmitTransfer(context.Background(), admissionIdentity(), dto.TransferIntent{
+		RequestID: requestID, SourceAccountID: account, Destination: "TEST-DESTINATION", Amount: value})
+	id := result.TransactionID
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,8 +204,9 @@ func TestPostgresFreezeInsertionFailure(t *testing.T) {
 			seedAccount(t, db, "SOURCE", "100.00")
 			execTestSQL(t, db, `CREATE FUNCTION fail_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN `+body+` END $$;
 				CREATE TRIGGER fail_insert BEFORE INSERT ON intermesh_transactions FOR EACH ROW EXECUTE FUNCTION fail_insert()`)
-			id, err := repo.FreezeFunds(dto.LedgerPayloadDTO{AccountID: "SOURCE", TargetAccount: "TEST", Amount: exactAmount(t, "12.30")})
-			if !errors.Is(err, ErrTransactionInfrastructure) || id != "" {
+			result, err := repo.AdmitTransfer(context.Background(), admissionIdentity(), admissionIntent(t, 1))
+			id := result.TransactionID
+			if !errors.Is(err, ErrTransferInfrastructure) || id != "" {
 				t.Fatalf("failed insert must not acknowledge freeze: %q %v", id, err)
 			}
 			assertBalances(t, db, "SOURCE", "100.00", "0.00")

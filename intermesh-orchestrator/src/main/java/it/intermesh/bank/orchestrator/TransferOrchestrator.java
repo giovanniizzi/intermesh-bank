@@ -2,11 +2,10 @@ package it.intermesh.bank.orchestrator;
 
 import it.intermesh.bank.dto.request.TransferRequestDTO;
 import it.intermesh.bank.dto.response.LedgerTransferResponseDTO;
-import it.intermesh.bank.dto.response.LedgerFreezeResponseDTO;
+import it.intermesh.bank.dto.response.LedgerAdmissionResponseDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
-import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import it.intermesh.bank.dto.response.TransferResponseDTO;
 import it.intermesh.bank.dto.request.LedgerTransactionRequestDTO;
 import it.intermesh.bank.dto.request.LedgerFinalizationRequestDTO;
@@ -29,7 +28,6 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import java.util.List;
 import java.math.BigDecimal;
 import java.util.Map;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
@@ -56,6 +54,9 @@ public class TransferOrchestrator {
     @Inject
     ObjectMapper json;
 
+    @Inject
+    io.vertx.ext.web.RoutingContext routingContext;
+
     @POST
     @Path("/transfers")
     @Authenticated
@@ -65,6 +66,17 @@ public class TransferOrchestrator {
         if (sourceAccount == null || sourceAccount.isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "Source account is required")).build();
+        }
+
+        String requestId = transferRequestDTO.getTransfer_request_id();
+        if (!LedgerAdmissionResponseDTO.validRequestId(requestId)) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "A UUID transfer_request_id is required")).build();
+        }
+        if (sourceAccount.codePointCount(0, sourceAccount.length()) > 50
+                || sourceAccount.codePoints().anyMatch(c -> Character.isWhitespace(c)
+                    || Character.isSpaceChar(c) || Character.isISOControl(c))) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Invalid source account")).build();
         }
 
         String targetAccount = transferRequestDTO.getTarget_account();
@@ -104,33 +116,29 @@ public class TransferOrchestrator {
         LOG.info("[TransferOrchestrator] Transfer processing requested.");
 
         LedgerTransactionRequestDTO ledgerTxRequest = new LedgerTransactionRequestDTO(
-            sourceAccount,
-            targetAccount,
-            amount
+            requestId, sourceAccount, targetAccount, amount,
+            transferRequestDTO.isAllowDuplicatePendingTransfer()
         );
 
         final String frozenTransactionId;
-        try (Response ledgerResp = ledgerClient.freezeFunds(ledgerTxRequest)) {
-            if (ledgerResp.getStatus() != Response.Status.OK.getStatusCode()) {
-                return Response.status(Response.Status.BAD_REQUEST)
-                        .entity(Map.of("status", "REJECTED", "reason", "Ledger freeze was not acknowledged; financial outcome was not confirmed.")).build();
+        try (Response ledgerResp = admit(ledgerTxRequest, identity)) {
+            int status = ledgerResp.getStatus();
+            if (status != 200 && status != 409 && status != 422) {
+                return ledgerFailure(ledgerResp, false);
             }
+            LedgerAdmissionResponseDTO acknowledgment;
             try {
-                LedgerFreezeResponseDTO acknowledgment = json.readerFor(LedgerFreezeResponseDTO.class)
-                        .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                        .readValue(ledgerResp.readEntity(String.class));
-                if (acknowledgment == null || !"FROZEN".equals(acknowledgment.getStatus())) {
-                    return invalidFreezeAcknowledgment();
-                }
-                frozenTransactionId = acknowledgment.getTransaction_id();
-                if (frozenTransactionId.isBlank()
-                        || frozenTransactionId.codePointCount(0, frozenTransactionId.length()) > 50
-                        || frozenTransactionId.codePoints().anyMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c) || Character.isISOControl(c))) {
-                    return invalidFreezeAcknowledgment();
-                }
+                acknowledgment = readAdmission(ledgerResp);
+                acknowledgment.validate(requestId, false, status, transferRequestDTO.isAllowDuplicatePendingTransfer());
             } catch (Exception e) {
+                // Intent conflicts have an error envelope rather than a persisted admission.
+                if (status == 409) return ledgerFailure(ledgerResp, false);
                 return invalidFreezeAcknowledgment();
             }
+            if (!acknowledgment.isNew()) {
+                return Response.status(status).header("Cache-Control", "no-store").entity(acknowledgment).build();
+            }
+            frozenTransactionId = acknowledgment.transactionId();
         } catch (Exception e) {
             LOG.error("[TransferOrchestrator] Ledger freeze outcome was not confirmed.");
             return Response.status(Response.Status.GATEWAY_TIMEOUT)
@@ -195,6 +203,79 @@ public class TransferOrchestrator {
         TransferResponseDTO responseBody = new TransferResponseDTO(commitResp);
 
         return Response.ok(responseBody).build();
+    }
+
+    @GET
+    @Path("/transfer-requests/{transfer_request_id}")
+    @Authenticated
+    public Response recoverTransfer(@PathParam("transfer_request_id") String requestId) {
+        routingContext.response().putHeader("Cache-Control", "no-store");
+        BankingIdentity identity = sessionGuard.requireIdentity();
+        if (!LedgerAdmissionResponseDTO.validRequestId(requestId)) {
+            return Response.status(400).header("Cache-Control", "no-store")
+                    .entity(Map.of("error", "A UUID transfer_request_id is required")).build();
+        }
+        try {
+            Response response;
+            try {
+                response = ledgerClient.getTransferRequest(requestId, identity.issuer(), identity.subject(), identity.ownerKey());
+            } catch (WebApplicationException e) {
+                response = e.getResponse();
+            }
+            try (Response ledgerResponse = response) {
+                if (ledgerResponse == null) throw new ProcessingException("Missing Ledger response");
+                if (ledgerResponse.getStatus() != 200) return ledgerFailure(ledgerResponse, true);
+                LedgerAdmissionResponseDTO result = readAdmission(ledgerResponse);
+                result.validate(requestId, true, 200, false);
+                return Response.ok(result).header("Cache-Control", "no-store").build();
+            }
+        } catch (Exception e) {
+            return Response.status(502).header("Cache-Control", "no-store")
+                    .entity(Map.of("status", "UNKNOWN", "reason", "Transfer recovery unavailable; financial outcome was not confirmed.")).build();
+        }
+    }
+
+    private Response admit(LedgerTransactionRequestDTO request, BankingIdentity identity) {
+        try {
+            return ledgerClient.freezeFunds(request, identity.issuer(), identity.subject(), identity.ownerKey());
+        } catch (WebApplicationException e) {
+            return e.getResponse();
+        }
+    }
+
+    private LedgerAdmissionResponseDTO readAdmission(Response response) throws java.io.IOException {
+        // Buffer once so an error envelope can be checked without reading a closed stream.
+        response.bufferEntity();
+        return json.readerFor(LedgerAdmissionResponseDTO.class)
+                .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .with(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+                .readValue(response.readEntity(String.class));
+    }
+
+    private Response ledgerFailure(Response response, boolean recovery) {
+        try {
+            var error = json.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .with(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+                    .readTree(response.readEntity(String.class));
+            String code = error.path("code").asText("");
+            String message = switch (code) {
+                case "REQUEST_INTENT_CONFLICT" -> response.getStatus() == 409 && !recovery
+                        ? "Transfer request intent does not match." : null;
+                case "TRANSFER_REQUEST_NOT_FOUND" -> response.getStatus() == 404
+                        ? "Request not found or inaccessible; an in-flight admission may still complete." : null;
+                case "COMMIT_OUTCOME_UNKNOWN" -> response.getStatus() == 503
+                        ? "Admission outcome is unknown; recover using the original transfer_request_id." : null;
+                case "TRANSFER_PERSISTENCE_UNAVAILABLE" -> response.getStatus() == 503
+                        ? "Transfer persistence is unavailable; financial outcome was not confirmed." : null;
+                default -> null;
+            };
+            if (message != null) return Response.status(response.getStatus()).header("Cache-Control", "no-store")
+                    .entity(Map.of("code", code, "error", message)).build();
+        } catch (Exception ignored) {
+            // An unusable acknowledgment cannot establish the admission outcome.
+        }
+        return Response.status(502).header("Cache-Control", "no-store")
+                .entity(Map.of("status", "UNKNOWN", "reason", "Ledger admission or recovery was not acknowledged; financial outcome was not confirmed.")).build();
     }
 
     private Response invalidFreezeAcknowledgment() {

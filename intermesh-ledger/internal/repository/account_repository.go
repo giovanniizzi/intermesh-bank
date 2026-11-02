@@ -2,7 +2,6 @@ package repository
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"intermesh-ledger/internal/dto"
 )
@@ -45,59 +44,6 @@ func (r *AccountRepository) CreateAccount(payload dto.AccountCreationPayloadDTO)
 		FrozenBalance: 0.00,
 	}
 	return account, nil
-}
-
-func (r *AccountRepository) FreezeFunds(payload dto.LedgerPayloadDTO) (string, error) {
-	if !payload.Amount.Valid(false) {
-		return "", errors.New("invalid_freeze_amount")
-	}
-	var txID string
-	err := r.db.QueryRow("SELECT 'TX-IM-' || gen_random_uuid()::text").Scan(&txID)
-	if err != nil {
-		return "", infrastructureError("freeze persistence", err)
-	}
-
-	tx, err := r.db.Begin()
-	if err != nil {
-		return "", infrastructureError("freeze persistence", err)
-	}
-	defer tx.Rollback()
-
-	result, err := tx.Exec(`
-		UPDATE intermesh_accounts 
-		SET balance = balance - $2, frozen_balance = frozen_balance + $2 
-		WHERE account_id = $1 AND balance >= $2`,
-		payload.AccountID, payload.Amount)
-	if err != nil {
-		return "", infrastructureError("freeze persistence", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return "", infrastructureError("freeze balance row count", err)
-	}
-	if rowsAffected == 0 {
-		return "", errors.New("insufficient_funds_or_invalid_account")
-	}
-	if rowsAffected != 1 {
-		return "", infrastructureError("freeze balance row count", nil)
-	}
-
-	result, err = tx.Exec(`
-		INSERT INTO intermesh_transactions (transaction_id, source_account_id, target_iban, amount, status) 
-		VALUES ($1, $2, $3, $4, 'PENDING')`,
-		txID, payload.AccountID, payload.TargetAccount, payload.Amount)
-	if err != nil {
-		return "", infrastructureError("freeze persistence", err)
-	}
-
-	if err := requireOneRow(result); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", infrastructureError("freeze persistence", err)
-	}
-	return txID, nil
 }
 
 func (r *AccountRepository) GetBalance(accountID string) (dto.AccountDTO, error) {

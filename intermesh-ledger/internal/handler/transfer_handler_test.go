@@ -220,7 +220,7 @@ func TestTransferHTTPRecoveryAndRoutingValidation(t *testing.T) {
 	for _, reverse := range []bool{false, true} {
 		t.Run(fmt.Sprint(reverse), func(t *testing.T) {
 			mux := http.NewServeMux()
-			legacy := NewLedgerHandler(nil)
+			legacy := func(http.ResponseWriter, *http.Request) {}
 			strict := NewTransferHandler(&transferRepositoryStub{})
 			defer func() {
 				if recover() == nil {
@@ -228,12 +228,34 @@ func TestTransferHTTPRecoveryAndRoutingValidation(t *testing.T) {
 				}
 			}()
 			if reverse {
-				mux.HandleFunc("POST /v1/ledger/freeze", legacy.HandleFreeze)
+				mux.HandleFunc("POST /v1/ledger/freeze", legacy)
 				strict.RegisterRoutes(mux)
 			} else {
 				strict.RegisterRoutes(mux)
-				mux.HandleFunc("POST /v1/ledger/freeze", legacy.HandleFreeze)
+				mux.HandleFunc("POST /v1/ledger/freeze", legacy)
 			}
 		})
+	}
+}
+
+func TestProductionTransferRoutesRejectLegacyBypass(t *testing.T) {
+	mux := NewRouter(nil)
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{"POST", "/v1/ledger/freeze", `{"account_id":"SOURCE","target_account":"TEST","amount":1}`, 400},
+		{"GET", "/v1/ledger/transfer-requests/not-a-uuid", "", 400},
+	} {
+		r := transferTestRequest(tc.method, tc.path, tc.body)
+		w := performTransferRequest(t, mux, r)
+		if w.Code != tc.status {
+			t.Fatalf("%s: status=%d", tc.path, w.Code)
+		}
+	}
+	r := transferTestRequest("POST", "/v1/ledger/freeze", transferTestBody(transferTestID, "12.30", "false"))
+	r.Header.Del("X-Intermesh-Subject")
+	if w := performTransferRequest(t, mux, r); w.Code != 401 {
+		t.Fatalf("identity-free freeze: %d", w.Code)
 	}
 }

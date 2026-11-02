@@ -43,6 +43,11 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     private final AtomicReference<String> lastLookupAccount = new AtomicReference<>("");
     private final AtomicReference<String> lastHistoryAccount = new AtomicReference<>("");
     private final AtomicReference<String> lastOwner = new AtomicReference<>("");
+    private final AtomicInteger recoveryCalls = new AtomicInteger();
+    private final AtomicReference<Map<String, String>> identityHeaders = new AtomicReference<>(Map.of());
+    private final Map<String, SyntheticAdmission> admissions = new ConcurrentHashMap<>();
+    private final AtomicReference<String> admissionRejection = new AtomicReference<>();
+    private final AtomicReference<String> recoveryResponseBody = new AtomicReference<>();
     private final AtomicInteger freezeCalls = new AtomicInteger();
     private final AtomicInteger commitCalls = new AtomicInteger();
     private final AtomicInteger unfreezeCalls = new AtomicInteger();
@@ -111,6 +116,8 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 commitStatus.set(((Number) settings.getOrDefault("commit", 200)).intValue());
                 unfreezeStatus.set(((Number) settings.getOrDefault("unfreeze", 200)).intValue());
                 freezeResponseBody.set((String) settings.get("freezeBody"));
+                admissionRejection.set((String) settings.get("admissionRejection"));
+                recoveryResponseBody.set((String) settings.get("recoveryBody"));
                 commitResponseBody.set((String) settings.get("commitBody"));
                 for (String operation : List.of("freeze", "commit", "unfreeze")) {
                     transferResponseModes.put(operation, (String) settings.getOrDefault(operation + "Mode", "normal"));
@@ -219,6 +226,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             }
             return;
         }
+        if (exchange.getRequestMethod().equals("GET") && path.startsWith("/v1/ledger/transfer-requests/")) {
+            recover(exchange, path.substring("/v1/ledger/transfer-requests/".length()));
+            return;
+        }
         String accountPrefix = "/v1/ledger/account/";
         if (exchange.getRequestMethod().equals("GET") && path.startsWith(accountPrefix)) {
             if (path.endsWith("/balance")) {
@@ -304,6 +315,11 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
     }
 
     private void resetTransfers() {
+        recoveryCalls.set(0);
+        identityHeaders.set(Map.of());
+        admissions.clear();
+        admissionRejection.set(null);
+        recoveryResponseBody.set(null);
         freezeCalls.set(0);
         commitCalls.set(0);
         unfreezeCalls.set(0);
@@ -328,6 +344,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
 
     private Map<String, Object> transferSnapshot() {
         return Map.ofEntries(
+                Map.entry("recoveryCalls", recoveryCalls.get()), Map.entry("identityHeaders", identityHeaders.get()),
                 Map.entry("freezeCalls", freezeCalls.get()), Map.entry("commitCalls", commitCalls.get()),
                 Map.entry("unfreezeCalls", unfreezeCalls.get()), Map.entry("mutationCalls", mutationCalls.get()),
                 Map.entry("transactions", Map.copyOf(transactions)),
@@ -342,6 +359,52 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                 .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(exchange.getRequestBody());
     }
 
+    private record SyntheticAdmission(Map<String, Object> intent, Map<String, String> identity,
+            String transactionId, String rejection) {}
+
+    private Map<String, String> identity(HttpExchange exchange) {
+        Map<String, String> headers = new java.util.LinkedHashMap<>();
+        for (String name : List.of("X-Intermesh-Issuer", "X-Intermesh-Subject", "X-Intermesh-Owner-Key")) {
+            var values = exchange.getRequestHeaders().get(name);
+            if (values == null || values.size() != 1 || values.get(0).isBlank()) return Map.of();
+            headers.put(name, values.get(0));
+        }
+        identityHeaders.set(Map.copyOf(headers));
+        return headers;
+    }
+
+    private Map<String, Object> admissionBody(String id, SyntheticAdmission admission, String status, boolean created) {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("status", status);
+        result.put("transfer_request_id", id);
+        result.put("admission_status", admission.rejection() == null ? "ADMITTED" : "REJECTED");
+        result.put("transaction_id", admission.transactionId());
+        result.put("transaction_state", admission.transactionId() == null ? null : transactions.get(admission.transactionId()).status());
+        result.put("new_transaction_created", created);
+        result.put("duplicate_pending_approved", admission.rejection() == null
+                && Boolean.TRUE.equals(admission.intent().get("allowDuplicatePendingTransfer")));
+        int matching = (int) transactions.values().stream().filter(t -> t.status().equals("PENDING")
+                && t.account_id().equals(admission.intent().get("account_id"))
+                && t.target_iban().equals(admission.intent().get("target_account"))
+                && t.amount().compareTo(new BigDecimal(admission.intent().get("amount").toString())) == 0).count();
+        result.put("matching_pending_count", matching);
+        if (admission.rejection() != null) result.put("rejection_code", admission.rejection());
+        return result;
+    }
+
+    private synchronized void recover(HttpExchange exchange, String id) throws IOException {
+        recoveryCalls.incrementAndGet();
+        Map<String, String> caller = identity(exchange);
+        SyntheticAdmission admission = admissions.get(id.toLowerCase(java.util.Locale.ROOT));
+        if (admission == null || !admission.identity().equals(caller)) {
+            respond(exchange, 404, Map.of("code", "TRANSFER_REQUEST_NOT_FOUND", "error", "not found"));
+        } else if (recoveryResponseBody.get() != null) {
+            respondBody(exchange, 200, recoveryResponseBody.get().replace("REQUEST_ID", id).getBytes(StandardCharsets.UTF_8));
+        } else {
+            respond(exchange, 200, admissionBody(id, admission, "RECOVERED", false));
+        }
+    }
+
     private record SyntheticTransaction(String account_id, BigDecimal amount, String target_iban, String status) {}
 
     private synchronized void financialOperation(HttpExchange exchange, String operation) throws IOException {
@@ -354,6 +417,35 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
             default -> throw new IllegalArgumentException("Unexpected test operation");
         };
         String mode = transferResponseModes.getOrDefault(operation, "normal");
+        Map<String, String> caller = Map.of();
+        String requestId = null;
+        if (operation.equals("freeze")) {
+            caller = identity(exchange);
+            if (caller.size() != 3 || !(request.get("transfer_request_id") instanceof String id)
+                    || !id.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+                    || !(request.get("allowDuplicatePendingTransfer") instanceof Boolean)
+                    || !request.keySet().equals(java.util.Set.of("transfer_request_id", "account_id", "target_account", "amount", "allowDuplicatePendingTransfer"))) {
+                respond(exchange, 400, Map.of("error", "Invalid admission")); return;
+            }
+            requestId = id.toLowerCase(java.util.Locale.ROOT);
+            SyntheticAdmission previous = admissions.get(requestId);
+            if (previous != null) {
+                if (!previous.identity().equals(caller)) {
+                    respond(exchange, 404, Map.of("code", "TRANSFER_REQUEST_NOT_FOUND", "error", "not found")); return;
+                }
+                if (!previous.intent().equals(request)) {
+                    respond(exchange, 409, Map.of("code", "REQUEST_INTENT_CONFLICT", "error", "conflict")); return;
+                }
+                int code = previous.rejection() == null ? 200 : previous.rejection().equals("INSUFFICIENT_FUNDS") ? 422 : 409;
+                respond(exchange, code, admissionBody(requestId, previous, previous.rejection() == null ? "REPLAYED" : "REJECTED", false)); return;
+            }
+            if (admissionRejection.get() != null) {
+                SyntheticAdmission rejected = new SyntheticAdmission(request, caller, null, admissionRejection.get());
+                admissions.put(requestId, rejected);
+                respond(exchange, rejected.rejection().equals("INSUFFICIENT_FUNDS") ? 422 : 409,
+                        admissionBody(requestId, rejected, "REJECTED", false)); return;
+            }
+        }
         if (mode.equals("disconnect-before-mutation")) { exchange.close(); return; }
         if (!(request.get("account_id") instanceof String accountId) || accountId.isBlank()
                 || !(request.get("amount") instanceof Number)) {
@@ -401,6 +493,7 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                     availableBalance.updateAndGet(value -> value.subtract(recorded));
                     frozenBalance.updateAndGet(value -> value.add(recorded));
                     transactions.put(transactionId, transaction);
+                    admissions.put(requestId, new SyntheticAdmission(request, caller, transactionId, null));
                 }
                 case "commit" -> {
                     frozenBalance.updateAndGet(value -> value.subtract(recorded));
@@ -418,12 +511,13 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
         String body = operation.equals("freeze") ? freezeResponseBody.get()
                 : operation.equals("commit") ? commitResponseBody.get() : null;
         if (body != null) {
-            respondBody(exchange, status, body.getBytes(StandardCharsets.UTF_8));
+            respondBody(exchange, status, body.replace("REQUEST_ID", requestId == null ? "" : requestId).getBytes(StandardCharsets.UTF_8));
         } else if (operation.equals("unfreeze")) {
             respond(exchange, status, Map.of());
+        } else if (operation.equals("freeze") && status == 200) {
+            respond(exchange, status, admissionBody(requestId, admissions.get(requestId), "FROZEN", true));
         } else {
-            respond(exchange, status, Map.of("status", operation.equals("freeze") ? "FROZEN" : "COMMITTED",
-                    "transaction_id", transactionId));
+            respond(exchange, status, Map.of("status", "COMMITTED", "transaction_id", transactionId));
         }
     }
 

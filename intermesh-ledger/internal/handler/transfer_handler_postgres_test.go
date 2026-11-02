@@ -19,10 +19,7 @@ func postgresTransferMux(t *testing.T) (*sql.DB, *http.ServeMux) {
 	execHTTPTestSQL(t, db, `INSERT INTO intermesh_accounts (account_id,user_id,iban,holder_name,balance)
 		VALUES ('SOURCE','synthetic-user','TEST-SOURCE','Synthetic User',100.00)`)
 	repo := repository.NewAccountRepository(db)
-	mux := transferTestMux(repo)
-	legacy := NewLedgerHandler(repo)
-	mux.HandleFunc("POST /v1/ledger/commit", legacy.HandleCommit)
-	mux.HandleFunc("POST /v1/ledger/unfreeze", legacy.HandleUnfreeze)
+	mux := NewRouter(repo)
 	return db, mux
 }
 

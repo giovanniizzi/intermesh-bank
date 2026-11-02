@@ -18,16 +18,20 @@ func TestPostgresHTTPTransactionLifecycle(t *testing.T) {
 	execHTTPTestSQL(t, db, `INSERT INTO intermesh_accounts (account_id,user_id,iban,holder_name,balance)
 		VALUES ('SOURCE','synthetic-user','TEST-IBAN','Synthetic Test',100.00),
 		('OTHER','synthetic-other','OTHER-IBAN','Synthetic Other',100.00)`)
-	handler := NewLedgerHandler(repository.NewAccountRepository(db))
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/ledger/freeze", handler.HandleFreeze)
-	mux.HandleFunc("POST /v1/ledger/commit", handler.HandleCommit)
-	mux.HandleFunc("POST /v1/ledger/unfreeze", handler.HandleUnfreeze)
+	mux := NewRouter(repository.NewAccountRepository(db))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	post := func(endpoint, body string, status int) []byte {
 		t.Helper()
-		response, err := server.Client().Post(server.URL+"/v1/ledger/"+endpoint, "application/json", strings.NewReader(body))
+		request, err := http.NewRequest("POST", server.URL+"/v1/ledger/"+endpoint, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Intermesh-Issuer", "https://issuer.example.invalid/realms/demo")
+		request.Header.Set("X-Intermesh-Subject", "synthetic-subject")
+		request.Header.Set("X-Intermesh-Owner-Key", "synthetic-user")
+		response, err := server.Client().Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -38,9 +42,11 @@ func TestPostgresHTTPTransactionLifecycle(t *testing.T) {
 		}
 		return content
 	}
+	sequence := 0
 	freeze := func(amount string) string {
 		t.Helper()
-		return decodeAcknowledgment(t, post("freeze", `{"account_id":"SOURCE","target_account":"TEST-RECIPIENT-IBAN","amount":`+amount+`}`, 200))
+		sequence++
+		return decodeAcknowledgment(t, post("freeze", fmt.Sprintf(`{"transfer_request_id":"00000000-0000-4000-8000-%012d","account_id":"SOURCE","target_account":"TEST-RECIPIENT-IBAN","amount":%s,"allowDuplicatePendingTransfer":false}`, sequence, amount), 200))
 	}
 	ref := func(id, account, amount string) string {
 		return fmt.Sprintf(`{"transaction_id":%q,"account_id":%q,"amount":%s}`, id, account, amount)

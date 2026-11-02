@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import io.restassured.response.Response;
@@ -414,7 +415,7 @@ public class AccountLookupSecurityTest {
                 response = request.get(endpoint);
             } else {
                 response = request.body(endpoint.endsWith("transfers")
-                        ? Map.of("source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1)
+                        ? Map.of("transfer_request_id", UUID.randomUUID().toString(), "source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1)
                         : Map.of("holder_name", "Test Account", "initial_deposit", 100)).post(endpoint);
             }
             response.then().statusCode(403);
@@ -448,7 +449,7 @@ public class AccountLookupSecurityTest {
                 .get("/api/v1/account/ACC-TEST/transactions").then().statusCode(200);
         given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + jwt)
                 .contentType(ContentType.JSON)
-                .body(Map.of("source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1))
+                .body(Map.of("transfer_request_id", UUID.randomUUID().toString(), "source_account", "ACC-TEST", "target_account", "ACC-OTHER", "amount", 1))
                 .post("/api/v1/transfers").then().statusCode(200);
         given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
                 .body("count", is(6)).body("fraudCalls", is(1));
@@ -671,12 +672,18 @@ public class AccountLookupSecurityTest {
         }
     }
 
+    private String admissionAcknowledgment() {
+        return "{\"status\":\"FROZEN\",\"transfer_request_id\":\"REQUEST_ID\",\"admission_status\":\"ADMITTED\","
+                + "\"transaction_id\":\"TX-KNOWN\",\"transaction_state\":\"PENDING\",\"new_transaction_created\":true,"
+                + "\"duplicate_pending_approved\":false,\"matching_pending_count\":1}";
+    }
+
     private Map<String, Object> transferPayload(String source, String target) {
-        return Map.of("source_account", source, "target_account", target, "amount", 12.5);
+        return Map.of("transfer_request_id", UUID.randomUUID().toString(), "source_account", source, "target_account", target, "amount", 12.5);
     }
 
     private String monetaryBody(String field, String token) {
-        return "{\"source_account\":\"ACC-ALICE\",\"target_account\":\"ACC-BOB\",\"holder_name\":\"Test\",\""
+        return "{\"transfer_request_id\":\"" + UUID.randomUUID() + "\",\"source_account\":\"ACC-ALICE\",\"target_account\":\"ACC-BOB\",\"holder_name\":\"Test\",\""
                 + field + "\":" + token + "}";
     }
 
@@ -834,7 +841,11 @@ public class AccountLookupSecurityTest {
         assertTrue(transactionId.startsWith("TX-IM-"));
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze", "fraud", "commit"), 2, 87.5f, 0.0f);
         given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
-                .body("transfer.freezeRequest", is(Map.of("account_id", "ACC-ALICE", "target_account", "ACC-BOB", "amount", 12.5f)))
+                .body("transfer.freezeRequest.account_id", is("ACC-ALICE"))
+                .body("transfer.freezeRequest.target_account", is("ACC-BOB"))
+                .body("transfer.freezeRequest.amount", is(12.5f))
+                .body("transfer.freezeRequest.allowDuplicatePendingTransfer", is(false))
+                .body("transfer.freezeRequest.size()", is(5))
                 .body("transfer.commitRequest", is(Map.of("transaction_id", transactionId, "account_id", "ACC-ALICE", "amount", 12.5f)))
                 .body("transfer.fraudRequest", is(Map.of("source_account", "ACC-ALICE",
                         "target_account", "ACC-BOB", "amount", 12.5f)));
@@ -846,7 +857,7 @@ public class AccountLookupSecurityTest {
         for (String id : List.of("null", "123", "true", "[]", "{}", "\"\"", "\" \"", "\"\\t\\n\"",
                 "\"TX WITH SPACE\"", "\"TX\\u0000TEST\"", "\"" + "T".repeat(51) + "\"")) {
             resetLedgerCalls();
-            transferOutcomes(Map.of("freezeBody", "{\"status\":\"FROZEN\",\"transaction_id\":" + id + "}"));
+            transferOutcomes(Map.of("freezeBody", admissionAcknowledgment().replace("\"TX-KNOWN\"", id)));
             Response response = transfer("ACC-ALICE", "ACC-BOB", jwt, null);
             response.then().statusCode(502).body("status", is("FAILED"))
                     .body("reason", is("Ledger freeze acknowledgment was invalid; financial outcome was not confirmed."))
@@ -890,7 +901,7 @@ public class AccountLookupSecurityTest {
         String jwt = token(claims("user-a"));
         for (String id : List.of("TX-IM-1234abcd", "T".repeat(50), "\uD83D\uDE00".repeat(50))) {
             resetLedgerCalls();
-            String body = new ObjectMapper().writeValueAsString(Map.of("status", "FROZEN", "transaction_id", id));
+            String body = admissionAcknowledgment().replace("TX-KNOWN", id);
             transferOutcomes(Map.of("freezeBody", body));
             transfer("ACC-ALICE", "ACC-BOB", jwt, null).then().statusCode(200)
                     .body("ledgerTransferResponseDTO.status", is("COMMITTED"))
@@ -917,7 +928,7 @@ public class AccountLookupSecurityTest {
                 "{\"status\":\"COMMITTED\",\"transaction_id\":\"TX-KNOWN\"} {}",
                 "{\"status\":\"COMMITTED\",\"transaction_id\":\"TX-KNOWN\"} garbage")) {
             resetLedgerCalls();
-            transferOutcomes(Map.of("commitBody", body, "freezeBody", "{\"status\":\"FROZEN\",\"transaction_id\":\"TX-KNOWN\"}"));
+            transferOutcomes(Map.of("commitBody", body, "freezeBody", admissionAcknowledgment()));
             assertCompensationResponse(transfer("ACC-ALICE", "ACC-BOB", jwt, null),
                     "Ledger commit acknowledgment was invalid; financial outcome was not confirmed.",
                     "Unfreeze request failed; restoration was not confirmed.");
@@ -962,7 +973,9 @@ public class AccountLookupSecurityTest {
         transferOutcomes(Map.of("fraud", 503, "unfreezeMode", "acknowledge-only"));
         String[] ids = new String[2];
         for (int i = 0; i < 2; i++) {
-            transfer("ACC-ALICE", "ACC-BOB", jwt, null).then().statusCode(504);
+            var payload = new LinkedHashMap<>(transferPayload("ACC-ALICE", "ACC-BOB"));
+            payload.put("allowDuplicatePendingTransfer", i == 1);
+            correlatedTransfer(payload, jwt).then().statusCode(504);
             ids[i] = given().baseUri(fixtureUri.toString()).get("/test/ledger-calls")
                     .then().extract().path("transfer.unfreezeRequest.transaction_id");
         }
@@ -1020,8 +1033,8 @@ public class AccountLookupSecurityTest {
     void transferWorkflowFreezeRefusalStopsBeforeFraud() {
         transferOutcomes(Map.of("freeze", 201));
         Response response = transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null);
-        response.then().statusCode(400).body("status", is("REJECTED"))
-                .body("reason", is("Ledger freeze was not acknowledged; financial outcome was not confirmed."));
+        response.then().statusCode(502).body("status", is("UNKNOWN"))
+                .body("reason", is("Ledger admission or recovery was not acknowledged; financial outcome was not confirmed."));
         assertNoRestorationClaim(response);
         assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
     }
@@ -1032,8 +1045,10 @@ public class AccountLookupSecurityTest {
             resetLedgerCalls();
             transferOutcomes(Map.of("freeze", status));
             Response response = transfer("ACC-ALICE", "ACC-BOB", token(claims("user-a")), null);
-            response.then().statusCode(504).body("status", is("FAILED"))
-                    .body("reason", is("Ledger freeze was not acknowledged; financial outcome was not confirmed."));
+            response.then().statusCode(502).body("status", is(status == 422 ? "FAILED" : "UNKNOWN"))
+                    .body("reason", is(status == 422
+                            ? "Ledger freeze acknowledgment was invalid; financial outcome was not confirmed."
+                            : "Ledger admission or recovery was not acknowledged; financial outcome was not confirmed."));
             assertNoRestorationClaim(response);
             assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
         }
@@ -1312,4 +1327,229 @@ public class AccountLookupSecurityTest {
         given().header("Authorization", "Bearer not-a-jwt").get("/hello").then().statusCode(401);
         assertLedgerCalls(0, "");
     }
+    private Response correlatedTransfer(Map<String, Object> payload, String jwt) {
+        return given().header("Authorization", "Bearer " + jwt).contentType(ContentType.JSON)
+                .body(payload).post("/api/v1/transfers");
+    }
+
+    private Response recover(String id, String jwt) {
+        return given().header("Authorization", "Bearer " + jwt)
+                .get("/api/v1/transfer-requests/" + id);
+    }
+
+    @Test
+    void transferRequiresStrictUuidAndBooleanBeforeDownstreamCalls() throws Exception {
+        String jwt = token(claims("user-a"));
+        ObjectMapper mapper = new ObjectMapper();
+        for (String value : List.of("null", "123", "true", "[]", "{}", "\"\"", "\"not-a-uuid\"", "\"1-1-1-1-1\"")) {
+            var body = mapper.valueToTree(transferPayload("ACC-ALICE", "ACC-BOB"));
+            ((com.fasterxml.jackson.databind.node.ObjectNode) body).set("transfer_request_id", mapper.readTree(value));
+            monetaryRequest("transfers", mapper.writeValueAsString(body), jwt).then().statusCode(400);
+            noDownstreamCalls();
+        }
+        var missing = new LinkedHashMap<>(transferPayload("ACC-ALICE", "ACC-BOB"));
+        missing.remove("transfer_request_id");
+        correlatedTransfer(missing, jwt).then().statusCode(400);
+        noDownstreamCalls();
+        for (String flag : List.of("null", "0", "1", "\"false\"", "\"true\"", "[]", "{}")) {
+            var body = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.valueToTree(transferPayload("ACC-ALICE", "ACC-BOB"));
+            body.set("allowDuplicatePendingTransfer", mapper.readTree(flag));
+            monetaryRequest("transfers", body.toString(), jwt).then().statusCode(400);
+            noDownstreamCalls();
+        }
+        String duplicate = mapper.writeValueAsString(transferPayload("ACC-ALICE", "ACC-BOB"))
+                .replace("\"amount\":12.5", "\"allowDuplicatePendingTransfer\":true,\"allowDuplicatePendingTransfer\":false,\"amount\":12.5");
+        monetaryRequest("transfers", duplicate, jwt).then().statusCode(400);
+        noDownstreamCalls();
+    }
+
+    @Test
+    void ledgerIdentityHeadersComeOnlyFromVerifiedJwt() {
+        String jwt = token(claims("user-a"));
+        var payload = new LinkedHashMap<>(transferPayload("ACC-ALICE", "ACC-BOB"));
+        payload.put("allowDuplicatePendingTransfer", false);
+        given().header("Authorization", "Bearer " + jwt)
+                .header("X-Intermesh-Issuer", "forged-issuer")
+                .header("X-Intermesh-Subject", "forged-subject")
+                .header("X-Intermesh-Owner-Key", "user-b").header("x-intermesh-user", "user-b")
+                .contentType(ContentType.JSON).body(payload).post("/api/v1/transfers").then().statusCode(200);
+        assertVerifiedLedgerHeaders();
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.freezeRequest.transfer_request_id", is(payload.get("transfer_request_id")))
+                .body("transfer.freezeRequest.allowDuplicatePendingTransfer", is(false));
+        given().header("Authorization", "Bearer " + jwt)
+                .header("X-Intermesh-Issuer", "forged-issuer").header("X-Intermesh-Subject", "forged-subject")
+                .header("X-Intermesh-Owner-Key", "user-b")
+                .get("/api/v1/transfer-requests/" + payload.get("transfer_request_id"))
+                .then().statusCode(200).header("Cache-Control", is("no-store"));
+        assertVerifiedLedgerHeaders();
+    }
+
+    private void assertVerifiedLedgerHeaders() {
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.identityHeaders", is(Map.of("X-Intermesh-Issuer", fixtureUri + "/realms/intermesh-bank",
+                        "X-Intermesh-Subject", "subject-user-a", "X-Intermesh-Owner-Key", "user-a")));
+    }
+
+    @Test
+    void replayReturnsStoredStateWithoutRepeatingWorkflow() {
+        String jwt = token(claims("user-a"));
+        for (String state : List.of("APPROVED", "PENDING", "FAILED")) {
+            resetLedgerCalls();
+            var payload = transferPayload("ACC-ALICE", "ACC-BOB");
+            if (!state.equals("APPROVED")) transferOutcomes(Map.of("fraud", 503,
+                    "unfreezeMode", state.equals("PENDING") ? "acknowledge-only" : "normal"));
+            correlatedTransfer(payload, jwt).then().statusCode(state.equals("APPROVED") ? 200 : 504);
+            correlatedTransfer(payload, jwt).then().statusCode(200).header("Cache-Control", is("no-store"))
+                    .body("status", is("REPLAYED")).body("admission_status", is("ADMITTED"))
+                    .body("transaction_state", is(state)).body("new_transaction_created", is(false));
+            given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                    .body("transfer.freezeCalls", is(2)).body("fraudCalls", is(1))
+                    .body("transfer.commitCalls", is(state.equals("APPROVED") ? 1 : 0))
+                    .body("transfer.unfreezeCalls", is(state.equals("APPROVED") ? 0 : 1));
+            recover((String) payload.get("transfer_request_id"), jwt).then().statusCode(200)
+                    .body("transaction_state", is(state)).body("new_transaction_created", is(false));
+        }
+    }
+
+    @Test
+    void domainRejectionsPersistAndIntentConflictsNeverRepeatFinancialCalls() {
+        String jwt = token(claims("user-a"));
+        for (String code : List.of("DUPLICATE_APPROVAL_REQUIRED", "DUPLICATE_APPROVAL_NOT_ELIGIBLE",
+                "DUPLICATE_EXCEPTION_USED", "ACTIVE_CYCLE_BLOCKED", "ACTIVE_CYCLE_CONFLICT", "INSUFFICIENT_FUNDS")) {
+            resetLedgerCalls();
+            transferOutcomes(Map.of("admissionRejection", code));
+            var payload = transferPayload("ACC-ALICE", "ACC-BOB");
+            for (int i = 0; i < 2; i++) correlatedTransfer(payload, jwt).then()
+                    .statusCode(code.equals("INSUFFICIENT_FUNDS") ? 422 : 409)
+                    .body("admission_status", is("REJECTED")).body("rejection_code", is(code))
+                    .body("new_transaction_created", is(false));
+            recover((String) payload.get("transfer_request_id"), jwt).then().statusCode(200)
+                    .body("admission_status", is("REJECTED")).body("rejection_code", is(code));
+            given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                    .body("fraudCalls", is(0)).body("transfer.mutationCalls", is(0))
+                    .body("transfer.commitCalls", is(0)).body("transfer.unfreezeCalls", is(0));
+            var conflict = new LinkedHashMap<>(payload);
+            conflict.put("amount", 13);
+            correlatedTransfer(conflict, jwt).then().statusCode(409).body("code", is("REQUEST_INTENT_CONFLICT"));
+        }
+    }
+
+    @Test
+    void recoveryRequiresVerifiedSubjectAndSessionAndIsReadOnly() {
+        String jwt = token(claims("user-a"));
+        var payload = transferPayload("ACC-ALICE", "ACC-BOB");
+        String id = (String) payload.get("transfer_request_id");
+        recover(id, jwt).then().statusCode(404).header("Cache-Control", is("no-store"))
+                .body("error", is("Request not found or inaccessible; an in-flight admission may still complete."));
+        String session = correlatedTransfer(payload, jwt).then().statusCode(200).extract().cookie("JSESSIONID");
+        recover(id, jwt).then().statusCode(200).body("status", is("RECOVERED"))
+                .body("transaction_state", is("APPROVED")).header("Cache-Control", is("no-store"));
+        recover(id, token(claims("user-b"))).then().statusCode(404);
+        given().cookie("JSESSIONID", session).get("/api/v1/transfer-requests/" + id).then().statusCode(401);
+        given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + token(claims("user-b")))
+                .get("/api/v1/transfer-requests/" + id).then().statusCode(403).header("Cache-Control", is("no-store"));
+        recover(id, token(claims("user-a"), "/test/token/invalid-signature")).then().statusCode(401);
+        recover("not-a-uuid", jwt).then().statusCode(400).header("Cache-Control", is("no-store"));
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.freezeCalls", is(1)).body("transfer.commitCalls", is(1))
+                .body("transfer.unfreezeCalls", is(0)).body("fraudCalls", is(1)).body("transfer.recoveryCalls", is(3));
+    }
+
+    @Test
+    void lostFreezeResponseIsRecoveredWithoutRestartingPendingTransfer() {
+        String jwt = token(claims("user-a"));
+        var payload = transferPayload("ACC-ALICE", "ACC-BOB");
+        transferOutcomes(Map.of("freezeMode", "disconnect-after-mutation"));
+        Response failed = correlatedTransfer(payload, jwt);
+        failed.then().statusCode(504);
+        assertNoRestorationClaim(failed);
+        String id = (String) payload.get("transfer_request_id");
+        recover(id, jwt).then().statusCode(200).body("transaction_state", is("PENDING"))
+                .body("new_transaction_created", is(false));
+        correlatedTransfer(payload, jwt).then().statusCode(200).body("status", is("REPLAYED"))
+                .body("transaction_state", is("PENDING"));
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.freezeCalls", is(2)).body("transfer.mutationCalls", is(1))
+                .body("fraudCalls", is(0)).body("transfer.commitCalls", is(0)).body("transfer.unfreezeCalls", is(0));
+    }
+
+    @Test
+    void unusableAdmissionCorrelationAndTypesNeverReachFraudOrFinalization() throws Exception {
+        String jwt = token(claims("user-a"));
+        var mapper = new ObjectMapper();
+        Map<String, String> changes = Map.ofEntries(
+                Map.entry("transfer_request_id", "\"00000000-0000-4000-8000-000000000099\""),
+                Map.entry("admission_status", "\"REJECTED\""),
+                Map.entry("transaction_state", "\"APPROVED\""),
+                Map.entry("new_transaction_created", "\"true\""),
+                Map.entry("duplicate_pending_approved", "true"),
+                Map.entry("matching_pending_count", "-1"), Map.entry("status", "\"REPLAYED\""));
+        for (var change : changes.entrySet()) {
+            resetLedgerCalls();
+            var body = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(admissionAcknowledgment());
+            body.set(change.getKey(), mapper.readTree(change.getValue()));
+            transferOutcomes(Map.of("freezeBody", body.toString()));
+            transfer("ACC-ALICE", "ACC-BOB", jwt, null).then().statusCode(502);
+            assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 1, 87.5f, 12.5f);
+        }
+        resetLedgerCalls();
+        transferOutcomes(Map.of("freeze", 503, "freezeBody", "{\"code\":\"COMMIT_OUTCOME_UNKNOWN\"}"));
+        transfer("ACC-ALICE", "ACC-BOB", jwt, null).then().statusCode(503)
+                .body("code", is("COMMIT_OUTCOME_UNKNOWN"));
+        assertTransferState(List.of("lookup:ACC-ALICE", "freeze"), 0, 100.0f, 0.0f);
+    }
+
+    @Test
+    void concurrentReplayCannotLaunchASecondTransferWorkflow() throws Exception {
+        String jwt = token(claims("user-a"));
+        var payload = transferPayload("ACC-ALICE", "ACC-BOB");
+        var a = CompletableFuture.supplyAsync(() -> correlatedTransfer(payload, jwt));
+        var b = CompletableFuture.supplyAsync(() -> correlatedTransfer(payload, jwt));
+        Response first = a.get(15, TimeUnit.SECONDS);
+        Response second = b.get(15, TimeUnit.SECONDS);
+        first.then().statusCode(200);
+        second.then().statusCode(200);
+        int replayCount = ("REPLAYED".equals(first.jsonPath().getString("status")) ? 1 : 0)
+                + ("REPLAYED".equals(second.jsonPath().getString("status")) ? 1 : 0);
+        assertEquals(1, replayCount);
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.freezeCalls", is(2)).body("fraudCalls", is(1))
+                .body("transfer.commitCalls", is(1)).body("transfer.unfreezeCalls", is(0))
+                .body("transfer.mutationCalls", is(2));
+    }
+
+    @Test
+    void recoveryReportsRecordedStateAfterLostFinalizationResponses() {
+        String jwt = token(claims("user-a"));
+        for (String failure : List.of("commit", "unfreeze")) {
+            resetLedgerCalls();
+            var payload = transferPayload("ACC-ALICE", "ACC-BOB");
+            transferOutcomes(failure.equals("commit") ? Map.of("commitMode", "disconnect-after-mutation")
+                    : Map.of("fraud", 503, "unfreezeMode", "disconnect-after-mutation"));
+            Response response = correlatedTransfer(payload, jwt);
+            response.then().statusCode(504);
+            assertNoRestorationClaim(response);
+            recover((String) payload.get("transfer_request_id"), jwt).then().statusCode(200)
+                    .body("transaction_state", is(failure.equals("commit") ? "APPROVED" : "FAILED"));
+            given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                    .body("transfer.mutationCalls", is(2)).body("fraudCalls", is(1))
+                    .body("transfer.commitCalls", is(failure.equals("commit") ? 1 : 0))
+                    .body("transfer.unfreezeCalls", is(1));
+        }
+    }
+
+    @Test
+    void recoveryRejectsUncorrelatedOrMutatingAcknowledgment() {
+        String jwt = token(claims("user-a"));
+        var payload = transferPayload("ACC-ALICE", "ACC-BOB");
+        correlatedTransfer(payload, jwt).then().statusCode(200);
+        transferOutcomes(Map.of("recoveryBody", admissionAcknowledgment()));
+        recover((String) payload.get("transfer_request_id"), jwt).then().statusCode(502)
+                .header("Cache-Control", is("no-store")).body("status", is("UNKNOWN"));
+        given().baseUri(fixtureUri.toString()).get("/test/ledger-calls").then()
+                .body("transfer.freezeCalls", is(1)).body("fraudCalls", is(1))
+                .body("transfer.commitCalls", is(1)).body("transfer.unfreezeCalls", is(0));
+    }
+
 }

@@ -59,7 +59,6 @@ func admissionFailure(operation string, cause error) error {
 
 // AdmitTransfer returns a persisted result only after commit. A domain rejection
 // returns that result with *AdmissionRejectedError; other errors return no result.
-// It is deliberately separate from the existing HTTP freeze implementation.
 func (r *AccountRepository) AdmitTransfer(ctx context.Context, identity dto.VerifiedTransferIdentity,
 	intent dto.TransferIntent) (dto.TransferAdmissionResult, error) {
 	var empty dto.TransferAdmissionResult

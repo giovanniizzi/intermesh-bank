@@ -25,8 +25,7 @@ func NewTransferHandler(repo TransferRepository) *TransferHandler {
 	return &TransferHandler{repo: repo}
 }
 
-// RegisterRoutes replaces the legacy freeze route; it must not be registered
-// alongside it. Production activation requires the coordinated Orchestrator contract.
+// RegisterRoutes registers transaction admission and read-only recovery.
 func (h *TransferHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/ledger/freeze", h.HandleAdmission)
 	mux.HandleFunc("GET /v1/ledger/transfer-requests/{transfer_request_id}", h.HandleRecovery)

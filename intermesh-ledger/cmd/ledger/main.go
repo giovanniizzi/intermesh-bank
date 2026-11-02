@@ -18,18 +18,7 @@ func main() {
 
 	// 3. Dependency Injection: Repository -> Handler
 	repo := repository.NewAccountRepository(db)
-	ledgerHandler := handler.NewLedgerHandler(repo)
-
-	mux := http.NewServeMux()
-
-	// 4. Enterprise routing layout matching exact operational endpoints
-	mux.HandleFunc("POST /v1/ledger/accounts", ledgerHandler.HandleCreateAccount)
-	mux.HandleFunc("POST /v1/ledger/freeze", ledgerHandler.HandleFreeze)
-	mux.HandleFunc("POST /v1/ledger/commit", ledgerHandler.HandleCommit)
-	mux.HandleFunc("POST /v1/ledger/unfreeze", ledgerHandler.HandleUnfreeze)
-	mux.HandleFunc("GET /v1/ledger/account/{id}/balance", ledgerHandler.HandleBalance)
-	mux.HandleFunc("GET /v1/ledger/account/{id}/transactions", ledgerHandler.HandleHistory)
-	mux.HandleFunc("GET /v1/ledger/accounts/{userID}", ledgerHandler.HandleUserAccounts)
+	mux := handler.NewRouter(repo)
 
 	log.Printf("InterMesh Core Ledger successfully initialized on port %s...\n", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))

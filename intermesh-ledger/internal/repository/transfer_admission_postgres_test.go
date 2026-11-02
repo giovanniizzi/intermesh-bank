@@ -357,7 +357,10 @@ func TestPostgresAdmissionLegacyCycles(t *testing.T) {
 			repo, db := postgresRepository(t)
 			seedAccount(t, db, "SOURCE", "100.00")
 			for i := 0; i < roots; i++ {
-				freezeReference(t, repo, "SOURCE", "12.30")
+				// Seed pre-registry transactions directly; production admission cannot create multiple ordinary roots.
+				execTestSQL(t, db, `UPDATE intermesh_accounts SET balance=balance-12.30,frozen_balance=frozen_balance+12.30 WHERE account_id='SOURCE';
+                    INSERT INTO intermesh_transactions (transaction_id,source_account_id,target_iban,amount,status)
+                    VALUES ('TX-IM-' || gen_random_uuid()::text,'SOURCE','TEST-DESTINATION',12.30,'PENDING')`)
 			}
 			intent := admissionIntent(t, 1)
 			intent.AllowDuplicatePendingTransfer = true

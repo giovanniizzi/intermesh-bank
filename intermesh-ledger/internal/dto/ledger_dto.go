@@ -15,17 +15,6 @@ type AccountCreationPayloadDTO struct {
 	InitialDeposit Amount `json:"initial_deposit"`
 }
 
-type LedgerPayloadDTO struct {
-	AccountID     string `json:"account_id"`
-	TargetAccount string `json:"target_account"`
-	Amount        Amount `json:"amount"`
-}
-
-type FreezeResponseDTO struct {
-	Status        string `json:"status"`
-	TransactionID string `json:"transaction_id"`
-}
-
 type TransactionHistoryDTO struct {
 	TransactionID string  `json:"transaction_id"`
 	TargetIBAN    string  `json:"target_iban"`

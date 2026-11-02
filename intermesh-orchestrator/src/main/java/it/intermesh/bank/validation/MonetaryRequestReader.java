@@ -36,7 +36,11 @@ public class MonetaryRequestReader implements MessageBodyReader<Object> {
             throw MonetaryAmounts.invalidRequest();
         }
         try {
-            return mapper.readerFor(type).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readValue(body);
+            var reader = mapper.readerFor(type).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+            if (TransferRequestDTO.class.equals(type)) {
+                reader = reader.with(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+            }
+            return reader.readValue(body);
         } catch (IOException e) {
             throw MonetaryAmounts.invalidRequest();
         }

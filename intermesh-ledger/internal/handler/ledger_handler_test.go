@@ -38,7 +38,7 @@ func monetaryBody(field, token string) string {
 }
 
 func TestMonetaryWriteValidation(t *testing.T) {
-	for _, endpoint := range []string{"accounts", "freeze", "commit", "unfreeze"} {
+	for _, endpoint := range []string{"accounts", "commit", "unfreeze"} {
 		t.Run(endpoint, func(t *testing.T) {
 			field := "amount"
 			if endpoint == "accounts" {
@@ -74,7 +74,7 @@ func TestMonetaryWriteValidation(t *testing.T) {
 }
 
 func TestValidMonetaryWritesUseExactSQLParameters(t *testing.T) {
-	for _, endpoint := range []string{"accounts", "freeze"} {
+	for _, endpoint := range []string{"accounts"} {
 		cases := append([]monetaryCase{}, validAmounts...)
 		field := "amount"
 		if endpoint == "accounts" {
@@ -145,36 +145,12 @@ func TestAmountPresenceAndJSONRepresentation(t *testing.T) {
 	}
 }
 
-func TestFreezeAcknowledgmentContract(t *testing.T) {
-	state, db, handler := testLedger(t)
-	defer db.Close()
-	response := serveWrite(handler, "freeze", monetaryBody("amount", "12.30"))
-	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
-		t.Fatalf("expected JSON HTTP 200, got %d %s", response.Code, response.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if len(body) != 2 || body["status"] != "FROZEN" || body["transaction_id"] != "TX-TEST" {
-		t.Fatalf("unexpected freeze acknowledgment: %v", body)
-	}
-	if _, exists := body["tmp_tx_id"]; exists {
-		t.Fatal("legacy transaction property must not be returned")
-	}
-	if state.calls != 3 {
-		t.Fatalf("freeze SQL calls changed: %d", state.calls)
-	}
-}
-
 func serveWrite(h *LedgerHandler, endpoint, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "/v1/ledger/"+endpoint, strings.NewReader(body))
 	w := httptest.NewRecorder()
 	switch endpoint {
 	case "accounts":
 		h.HandleCreateAccount(w, r)
-	case "freeze":
-		h.HandleFreeze(w, r)
 	case "commit":
 		h.HandleCommit(w, r)
 	case "unfreeze":

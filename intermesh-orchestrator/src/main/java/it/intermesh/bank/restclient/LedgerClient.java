@@ -7,6 +7,7 @@ import it.intermesh.bank.dto.response.LedgerAccountResponseDTO;
 import it.intermesh.bank.dto.response.LedgerTransferResponseDTO;
 import it.intermesh.bank.dto.response.TransactionHistoryDTO;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -25,7 +26,17 @@ public interface LedgerClient {
 
     @POST
     @Path("/freeze")
-    Response freezeFunds(LedgerTransactionRequestDTO request);
+    Response freezeFunds(LedgerTransactionRequestDTO request,
+            @HeaderParam("X-Intermesh-Issuer") String issuer,
+            @HeaderParam("X-Intermesh-Subject") String subject,
+            @HeaderParam("X-Intermesh-Owner-Key") String ownerKey);
+
+    @GET
+    @Path("/transfer-requests/{transfer_request_id}")
+    Response getTransferRequest(@PathParam("transfer_request_id") String requestId,
+            @HeaderParam("X-Intermesh-Issuer") String issuer,
+            @HeaderParam("X-Intermesh-Subject") String subject,
+            @HeaderParam("X-Intermesh-Owner-Key") String ownerKey);
 
     @POST
     @Path("/unfreeze")
