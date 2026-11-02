@@ -12,6 +12,8 @@ spec:
   - match:
     - uri:
         prefix: /api
+    rewrite:
+        authority: intermesh-orchestrator.session.intermesh.com
     route:
     - destination:
         host: intermesh-orchestrator.intermesh-backend.svc.cluster.local

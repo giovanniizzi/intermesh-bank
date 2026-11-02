@@ -13,7 +13,6 @@ spec:
         metadata:
           name: config-policy-istio-cross-gateway
         spec:
-
           remediationAction: enforce
           namespaceSelector:
             exclude:
@@ -38,12 +37,14 @@ spec:
                   servers:
                     - port:
                         number: 15443
-                        name: https-tls
-                        protocol: HTTPS
+                        name: tls
+                        protocol: TLS
                       tls:
-                        mode: ISTIO_MUTUAL
+                        mode: AUTO_PASSTHROUGH
                       hosts:
-                        - "*"
+                        - "intermesh-ledger.intermesh-backend.svc.cluster.local"
+                        - "fraud-analytics.intermesh-backend.svc.cluster.local"
+                        - "intermesh-ui.intermesh-frontend.svc.cluster.local"
             - complianceType: musthave
               objectDefinition:
                 apiVersion: networking.istio.io/v1beta1

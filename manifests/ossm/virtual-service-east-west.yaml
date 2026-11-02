@@ -9,14 +9,14 @@ spec:
   gateways:
   - east-west-gateway
   http:
-  - match:
-    - uri:
-        prefix: /api
-    route:
-    - destination:
-        host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
-        port:
-          number: 80
+  #- match:
+  #  - uri:
+  #      prefix: /api
+  #  route:
+  #  - destination:
+  #      host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
+  #      port:
+  #        number: 80
   - match:
     - uri:
         prefix: /v2/fraud
