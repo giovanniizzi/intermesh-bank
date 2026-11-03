@@ -1,0 +1,19 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-network2-identity-generator
+placementBindingDefaults:
+  name: binding-intermesh-network2-identity
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: inform
+  complianceType: musthave
+  metadataComplianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  placement:
+    placementName: placement-intermesh-network2
+policies:
+  - name: intermesh-network2-identity
+    manifests:
+      - path: namespace-labels/network2.yaml
