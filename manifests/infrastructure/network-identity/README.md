@@ -6,11 +6,11 @@ labels on Hub `ManagedCluster` objects to select the intended Istio network:
 
 | Hub ManagedCluster labels | Placement | Required Namespace label |
 | --- | --- | --- |
-| `ossm-enabled=true`, `intermesh.io/network=network1` | `placement-intermesh-network1` | `topology.istio.io/network=network1` |
-| `ossm-enabled=true`, `intermesh.io/network=network2` | `placement-intermesh-network2` | `topology.istio.io/network=network2` |
+| `ossm-enabled=true`, `ossm-network=network1` | `placement-intermesh-network1` | `topology.istio.io/network=network1` |
+| `ossm-enabled=true`, `ossm-network=network2` | `placement-intermesh-network2` | `topology.istio.io/network=network2` |
 
-`intermesh.io/network` is a project selection convention, not an Istio label.
-Verify ownership of the `intermesh.io` DNS prefix before production adoption.
+`ossm-network` is a project-defined ManagedCluster label, following the existing
+`ossm-enabled` convention. It is not an official Red Hat label or an Istio label.
 The `topology.istio.io/network` label belongs on the managed cluster's
 `istio-system` Namespace. Labeling that Namespace does not label its Hub
 ManagedCluster object.
@@ -21,9 +21,9 @@ After verifying the actual ACM registration names, apply these labels on the Hub
 
 ```sh
 oc label managedcluster <cluster1-managedcluster-name> \
-  intermesh.io/network=network1
+  ossm-network=network1
 oc label managedcluster <cluster2-managedcluster-name> \
-  intermesh.io/network=network2
+  ossm-network=network2
 ```
 
 These are manual examples, not automated actions. The existing `ossm-enabled=true`

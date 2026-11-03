@@ -9,4 +9,4 @@ spec:
         labelSelector:
           matchLabels:
             ossm-enabled: "true"
-            intermesh.io/network: network1
+            ossm-network: network1
