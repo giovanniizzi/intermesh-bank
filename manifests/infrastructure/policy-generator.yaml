@@ -1,0 +1,18 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-ingress-namespace-generator
+placementBindingDefaults:
+  name: binding-intermesh-infra-ns-ingress
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: inform
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  placement:
+    placementName: placement-all-clusters
+policies:
+  - name: intermesh-infra-ns-ingress
+    manifests:
+      - path: namespaces
