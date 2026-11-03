@@ -1,0 +1,15 @@
+apiVersion: sailoperator.io/v1
+kind: Istio
+metadata:
+  name: default
+spec:
+  namespace: istio-system
+  profile: openshift
+  values:
+    global:
+      meshID: mesh1
+    meshConfig:
+      trustDomain: cluster.local
+      defaultConfig:
+        proxyMetadata:
+          ISTIO_META_DNS_CAPTURE: "true"
