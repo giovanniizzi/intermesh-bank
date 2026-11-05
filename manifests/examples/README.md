@@ -118,10 +118,24 @@ resource identity and original-placeholder tests unchanged. They reject a
 different template identity or ordering before replacing its hostname. These
 patches change ACM expectations only; application Kustomize deploys the resources.
 
-Set the two replacement values from the effective private application renderings.
-Both complete ServiceEntry definitions must be identical across networks, and
+The second patch targets `intermesh-security-oidc`. Its ConfigurationPolicy
+contains RequestAuthentication `jwt-keycloak-auth` at index `0` and
+AuthorizationPolicy `require-jwt-policy` at index `1`. Replace only the embedded
+`spec.jwtRules[0].issuer`, `spec.jwtRules[0].jwksUri` and
+`spec.rules[0].from[0].source.requestPrincipals[0]` values. Preserve every identity
+and public-placeholder test, and keep the existing external-discovery patch.
+
+Set all five replacement values from the effective private application renderings.
+The complete ServiceEntry and OIDC definitions must be identical across networks, and
 each private Hub expectation must exactly match both application instances,
-including scalar types and array ordering. Stop if the networks differ.
+including scalar types and array ordering. Stop if the networks differ. The
+application and Hub overlays maintain separate copies of these values, so repeat
+the comparisons whenever either configuration changes.
+
+Keep the Istio issuer equal to Orchestrator's verification issuer and the UI
+base URL plus `/realms/intermesh-bank`. The JWKS URI adds
+`/protocol/openid-connect/certs` to the issuer; the principal pattern adds `/*`.
+The Keycloak ServiceEntry uses only the corresponding hostname.
 
 Render public and private networking governance with the trusted plugin:
 
@@ -130,11 +144,13 @@ oc kustomize manifests/ossm --enable-alpha-plugins
 oc kustomize .local/hub-governance --enable-alpha-plugins
 ```
 
-The example and existing private test hostnames are nonfunctional. Before any
-deployment, configure valid environment-specific DNS names in both private
+The example and existing private test endpoints are nonfunctional. Before any
+deployment, configure valid environment-specific DNS and OIDC values in both private
 application overlays and the private Hub overlay, re-render all three, and
-revalidate exact equality. Check service reachability and TLS separately on real
-clusters. Public governance output is not the deployable private configuration.
+revalidate exact equality. Check DNS, TLS, JWKS retrieval, JWT validation,
+ALLOW/DENY composition and browser login/redirect behavior separately on real
+clusters in both networks. Public governance output is not the deployable
+private configuration.
 
 Keep private configuration and rendered output out of public logs and artifacts.
 Hostnames are visible to readers of Hub and propagated Policies; these patches

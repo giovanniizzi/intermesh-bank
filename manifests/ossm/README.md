@@ -125,8 +125,8 @@ and [configuration instructions](../examples/README.md#hub-governance-overlay).
 Keep environment-specific values under `.local/`. Configured hostnames are
 visible to users authorized to read Hub and propagated Policy resources; never
 store credentials in these patches or publish private rendered output. The same
-nested-patch model can support OIDC expectations separately; this observer does
-not include OIDC or WasmPlugin resources.
+nested-patch model also supports the separate OIDC observer below; this external
+discovery observer does not include OIDC or WasmPlugin resources.
 
 Deployment is blocked while private hostnames are nonfunctional test values.
 Replace them with valid environment-specific DNS names in the application and
@@ -134,6 +134,37 @@ Hub overlays, re-render both private application overlays and the private Hub
 overlay, and require exact ServiceEntry equality again before deployment.
 Validate reachability and TLS behavior separately on real clusters; compliance
 does not prove connectivity or establish egress isolation.
+
+## OIDC security
+
+The [`intermesh-security-oidc`](policy-generator-security-oidc.yaml) Policy
+observes the original [RequestAuthentication](jwt-request-authentication.yaml)
+and [AuthorizationPolicy](jwt-authorization-policy.yaml), in that order, through
+one ConfigurationPolicy. It reuses `placement-all-clusters` and depends only on
+`intermesh-ossm-operator` being `Compliant`. Both remediation modes are `inform`,
+comparison is `musthave`, pruning and recreation are `None`, and `ignorePending`
+defaults to `false`. Application Kustomize retains deployment ownership and the
+original selectors, token forwarding and ALLOW/DENY behavior.
+
+The private Hub overlay adds identity-guarded JSON patches for the embedded JWT
+issuer, JWKS URI and request-principal pattern. Use the effective private
+application values and require complete equality of both security resources
+across networks. Compare each Hub expectation against both private application
+renderings, preserving scalar types and array order. Keep the ConfigurationPolicy,
+template identity and original-placeholder tests intact so a mismatch stops
+rendering. Revalidate these duplicated values after every configuration change.
+
+Keep the UI Keycloak base URL, realm, Orchestrator verification issuer, Istio
+issuer/JWKS/principal fields and Keycloak ServiceEntry host coherent. These are
+different formats of related configuration, not interchangeable strings. The
+configured URLs are visible to Policy readers and must not contain credentials.
+
+Deployment remains blocked while private identity-provider and external endpoints
+are nonfunctional test placeholders. Configure valid environment values and
+repeat private equivalence checks before deployment. Then validate DNS, TLS,
+JWKS retrieval, JWT validation, ALLOW/DENY composition and browser login/redirect
+behavior across both networks on real clusters. Policy compliance alone does
+not establish live authentication or authorization behavior.
 
 ## Rendering and validation
 
@@ -152,13 +183,15 @@ oc kustomize .local/hub-governance --enable-alpha-plugins
 
 Use the private output for environment-specific expectations after validation;
 the public output retains non-deployable placeholders. Both entrypoints render
-the same resource identities and differ only in the two expected hostnames.
+the same resource identities and differ only in five expected values: two
+ServiceEntry hosts, the JWT issuer, JWKS URI and request-principal pattern.
 Infrastructure governance and Hub Keycloak provisioning remain separate entrypoints.
 
-The entrypoint renders ten Policies, ten PlacementBindings and one shared
+The entrypoint renders eleven Policies, eleven PlacementBindings and one shared
 Placement. It emits no standalone VirtualService, DestinationRule,
-AuthorizationPolicy or ServiceEntry. The generator inputs are local files or
-Kustomize directories beneath this Kustomization directory. Application rendering
+RequestAuthentication, AuthorizationPolicy or ServiceEntry. The generator inputs
+are local files or Kustomize directories beneath this Kustomization directory.
+Application rendering
 does not require the plugin and
 continues to include the VirtualService and each network's DestinationRule directly.
 
