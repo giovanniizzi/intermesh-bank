@@ -5,7 +5,7 @@ metadata:
   namespace: open-cluster-management-policies
 spec:
   disabled: false
-  remediationAction: enforce
+  remediationAction: inform
   policy-templates:
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -13,7 +13,7 @@ spec:
         metadata:
           name: config-policy-orchestrator-session
         spec:
-          remediationAction: enforce
+          remediationAction: inform
           namespaceSelector:
             exclude:
               - kube-*
