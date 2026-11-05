@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: istio-eastwestgateway
+    install.operator.istio.io/owning-resource: unknown
+    istio: eastwestgateway
+    istio.io/rev: default
+    operator.istio.io/component: IngressGateways
+    release: istio
+  name: istio-eastwestgateway
+  namespace: istio-east-west
+spec:
+  selector:
+    matchLabels:
+      app: istio-eastwestgateway
+      istio: eastwestgateway
+  strategy:
+    rollingUpdate:
+      maxSurge: 100%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      annotations:
+        inject.istio.io/templates: gateway
+        prometheus.io/path: /stats/prometheus
+        prometheus.io/port: "15020"
+        prometheus.io/scrape: "true"
+        sidecar.istio.io/inject: "true"
+      labels:
+        app: istio-eastwestgateway
+        chart: gateways
+        heritage: Tiller
+        install.operator.istio.io/owning-resource: unknown
+        istio: eastwestgateway
+        operator.istio.io/component: IngressGateways
+        release: istio
+        sidecar.istio.io/inject: "true"
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution: null
+          requiredDuringSchedulingIgnoredDuringExecution: null
+      containers:
+        - env:
+            - name: ISTIO_META_REQUESTED_NETWORK_VIEW
+            - name: ISTIO_META_UNPRIVILEGED_POD
+              value: "true"
+          image: auto
+          name: istio-proxy
+          ports:
+            - containerPort: 15021
+              protocol: TCP
+            - containerPort: 15443
+              protocol: TCP
+            - containerPort: 15012
+              protocol: TCP
+            - containerPort: 15017
+              protocol: TCP
+            - containerPort: 15090
+              name: http-envoy-prom
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 2000m
+              memory: 1024Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - mountPath: /etc/istio/ingressgateway-certs
+              name: ingressgateway-certs
+              readOnly: true
+            - mountPath: /etc/istio/ingressgateway-ca-certs
+              name: ingressgateway-ca-certs
+              readOnly: true
+      serviceAccountName: istio-eastwestgateway-service-account
+      volumes:
+        - name: ingressgateway-certs
+          secret:
+            optional: true
+            secretName: istio-ingressgateway-certs
+        - name: ingressgateway-ca-certs
+          secret:
+            optional: true
+            secretName: istio-ingressgateway-ca-certs
