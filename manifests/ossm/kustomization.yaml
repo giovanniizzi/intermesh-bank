@@ -12,3 +12,4 @@ generators:
   - policy-generator-ingress-network2.yaml
   - policy-generator-affinity-network1.yaml
   - policy-generator-affinity-network2.yaml
+  - policy-generator-security-static.yaml

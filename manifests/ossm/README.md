@@ -48,6 +48,22 @@ availability or working session affinity. Validate local and cross-network
 cookie affinity, the L7 East-West route and workload-unavailability scenarios
 on the deployed mesh.
 
+## Static security
+
+The [`intermesh-security-static`](policy-generator-security-static.yaml) Policy
+observes [`deny-orchestrator-without-jwt`](policies/deny-orchestrator-without-jwt.yaml)
+through the shared `placement-all-clusters` Placement. The AuthorizationPolicy
+selects Orchestrator and denies requests without an authenticated request principal
+on workload port `8080`.
+
+The observer references the original manifest directly and requires the shared
+`intermesh-ossm-operator` Policy to be `Compliant`. Its parent Policy and embedded
+ConfigurationPolicy use `inform`, with `musthave` comparison, pruning and
+automatic recreation set to `None`, and `ignorePending: false`. ACM does not
+create, update or delete the AuthorizationPolicy; the
+[shared application base](../kustomization.yaml) retains deployment ownership.
+Compliance reports configuration agreement, not runtime authentication enforcement.
+
 ## Rendering and validation
 
 From the repository root, render Hub governance with the installed trusted
@@ -57,8 +73,8 @@ PolicyGenerator plugin:
 oc kustomize manifests/ossm --enable-alpha-plugins
 ```
 
-The entrypoint renders seven Policies, seven PlacementBindings and one shared
-Placement. It emits no standalone VirtualService or DestinationRule. The
+The entrypoint renders eight Policies, eight PlacementBindings and one shared
+Placement. It emits no standalone VirtualService, DestinationRule or AuthorizationPolicy. The
 generator inputs are local files or Kustomize directories beneath this
 Kustomization directory. Application rendering does not require the plugin and
 continues to include the VirtualService and each network's DestinationRule directly.
