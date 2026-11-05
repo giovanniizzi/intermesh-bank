@@ -1,0 +1,25 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-affinity-network2-generator
+placementBindingDefaults:
+  name: binding-intermesh-affinity-network2
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: inform
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  placement:
+    placementName: placement-intermesh-network2
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-istio-network2
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+policies:
+  - name: intermesh-affinity-network2
+    manifests:
+      - path: destination-rules/network2

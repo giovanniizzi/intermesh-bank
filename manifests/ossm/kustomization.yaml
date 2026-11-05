@@ -10,3 +10,5 @@ resources:
 generators:
   - policy-generator-ingress-network1.yaml
   - policy-generator-ingress-network2.yaml
+  - policy-generator-affinity-network1.yaml
+  - policy-generator-affinity-network2.yaml

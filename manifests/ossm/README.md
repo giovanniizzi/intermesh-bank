@@ -1,4 +1,6 @@
-# Ingress routing observation
+# Networking observation
+
+## Ingress routing
 
 The application Kustomize workflow deploys
 [`istio-ingress/ingress-routing-mesh`](virtual-service.yaml) through the
@@ -22,6 +24,32 @@ set to `None`. ACM observes the VirtualService without creating, updating or
 removing it. Application Kustomize retains deployment ownership; an enforcing
 ownership cutover is outside this configuration.
 
+## Session affinity
+
+The [network1](destination-rules/network1/kustomization.yaml) and
+[network2](destination-rules/network2/kustomization.yaml) DestinationRules remain
+deployed by their corresponding application Kustomize overlays. ACM observes
+each rule through one network-specific Policy:
+
+| Policy | Existing Placement | Required control-plane Policy |
+|---|---|---|
+| [`intermesh-affinity-network1`](policy-generator-affinity-network1.yaml) | `placement-intermesh-network1` | `intermesh-istio-network1` |
+| [`intermesh-affinity-network2`](policy-generator-affinity-network2.yaml) | `placement-intermesh-network2` | `intermesh-istio-network2` |
+
+The original rules retain cookie-based consistent hashing with `network1.session`
+and `network2.session`, respectively, and cookie TTL `0s`. Each observer contains
+one DestinationRule template, uses `inform` and `musthave`, and sets pruning and
+automatic recreation to `None`. ACM does not create, update or delete the rules;
+deployment ownership is unchanged. Enforcement requires a separate ownership
+review.
+
+Control-plane dependency compliance does not establish Orchestrator Service
+availability or working session affinity. Validate local and cross-network
+cookie affinity, the L7 East-West route and workload-unavailability scenarios
+on the deployed mesh.
+
+## Rendering and validation
+
 From the repository root, render Hub governance with the installed trusted
 PolicyGenerator plugin:
 
@@ -29,10 +57,11 @@ PolicyGenerator plugin:
 oc kustomize manifests/ossm --enable-alpha-plugins
 ```
 
-The entrypoint renders five Policies, five PlacementBindings and one shared
-Placement. It emits no standalone VirtualService. The generator inputs are local
-files beneath this Kustomization directory. Application rendering does not
-require the plugin and continues to include the VirtualService directly.
+The entrypoint renders seven Policies, seven PlacementBindings and one shared
+Placement. It emits no standalone VirtualService or DestinationRule. The
+generator inputs are local files or Kustomize directories beneath this
+Kustomization directory. Application rendering does not require the plugin and
+continues to include the VirtualService and each network's DestinationRule directly.
 
 Compliance of the [ingress workload Policy](../infrastructure/mesh/gateways/ingress/README.md)
 does not prove the gateway Deployment is Ready or its LoadBalancer is reachable.
