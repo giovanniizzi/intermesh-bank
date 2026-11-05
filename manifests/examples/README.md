@@ -105,6 +105,41 @@ Render from the repository root:
 oc kustomize .local/hub-keycloak
 ```
 
+## Hub governance overlay
+
+Copy [hub-governance.kustomization.example.yaml](hub-governance.kustomization.example.yaml)
+to `.local/hub-governance/kustomization.yaml`. This Git-ignored overlay references
+`../../manifests/ossm`; it is separate from Hub Keycloak realm provisioning.
+
+The example targets parent Policy `intermesh-discovery-external`, then patches
+`spec.hosts[0]` inside its embedded ServiceEntry objectDefinitions: PostgreSQL at
+object-template index `0`, Keycloak at index `1`. Keep the ConfigurationPolicy,
+resource identity and original-placeholder tests unchanged. They reject a
+different template identity or ordering before replacing its hostname. These
+patches change ACM expectations only; application Kustomize deploys the resources.
+
+Set the two replacement values from the effective private application renderings.
+Both complete ServiceEntry definitions must be identical across networks, and
+each private Hub expectation must exactly match both application instances,
+including scalar types and array ordering. Stop if the networks differ.
+
+Render public and private networking governance with the trusted plugin:
+
+```sh
+oc kustomize manifests/ossm --enable-alpha-plugins
+oc kustomize .local/hub-governance --enable-alpha-plugins
+```
+
+The example and existing private test hostnames are nonfunctional. Before any
+deployment, configure valid environment-specific DNS names in both private
+application overlays and the private Hub overlay, re-render all three, and
+revalidate exact equality. Check service reachability and TLS separately on real
+clusters. Public governance output is not the deployable private configuration.
+
+Keep private configuration and rendered output out of public logs and artifacts.
+Hostnames are visible to readers of Hub and propagated Policies; these patches
+are not credential storage and must not contain passwords, tokens or keys.
+
 ## Shared PostgreSQL database
 
 All Ledger workloads across the OpenShift clusters use one shared external

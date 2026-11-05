@@ -103,6 +103,38 @@ and Channel Hub remain commented out and excluded from application rendering
 and observation. External PostgreSQL and Keycloak ServiceEntries are outside
 this observer's scope.
 
+## External service discovery
+
+The [`intermesh-discovery-external`](policy-generator-discovery-external.yaml)
+Policy observes the original [PostgreSQL](serviceentry/serviceentry-db.yaml)
+and [Keycloak](serviceentry/serviceentry-keycloak.yaml) ServiceEntries, in that
+order, through one ConfigurationPolicy. It reuses `placement-all-clusters` and
+requires `intermesh-ossm-operator` to be `Compliant`. Both remediation modes are
+`inform`, comparison is `musthave`, pruning and recreation are `None`, and
+`ignorePending` defaults to `false`. Application Kustomize remains the deployment
+owner; ACM does not create, update or delete these ServiceEntries.
+
+Public rendering retains the original placeholder hosts. The ignored private
+Hub overlay patches only the two hostnames inside the generated Policy's
+ServiceEntry expectations, after PolicyGenerator runs. JSON Patch identity and
+placeholder tests guard both replacements. The complete expected definitions
+must match the effective private application resources in both networks before
+using a shared Policy. See the [private Hub overlay example](../examples/hub-governance.kustomization.example.yaml)
+and [configuration instructions](../examples/README.md#hub-governance-overlay).
+
+Keep environment-specific values under `.local/`. Configured hostnames are
+visible to users authorized to read Hub and propagated Policy resources; never
+store credentials in these patches or publish private rendered output. The same
+nested-patch model can support OIDC expectations separately; this observer does
+not include OIDC or WasmPlugin resources.
+
+Deployment is blocked while private hostnames are nonfunctional test values.
+Replace them with valid environment-specific DNS names in the application and
+Hub overlays, re-render both private application overlays and the private Hub
+overlay, and require exact ServiceEntry equality again before deployment.
+Validate reachability and TLS behavior separately on real clusters; compliance
+does not prove connectivity or establish egress isolation.
+
 ## Rendering and validation
 
 From the repository root, render Hub governance with the installed trusted
@@ -112,7 +144,18 @@ PolicyGenerator plugin:
 oc kustomize manifests/ossm --enable-alpha-plugins
 ```
 
-The entrypoint renders nine Policies, nine PlacementBindings and one shared
+Render private networking governance from the same public base:
+
+```sh
+oc kustomize .local/hub-governance --enable-alpha-plugins
+```
+
+Use the private output for environment-specific expectations after validation;
+the public output retains non-deployable placeholders. Both entrypoints render
+the same resource identities and differ only in the two expected hostnames.
+Infrastructure governance and Hub Keycloak provisioning remain separate entrypoints.
+
+The entrypoint renders ten Policies, ten PlacementBindings and one shared
 Placement. It emits no standalone VirtualService, DestinationRule,
 AuthorizationPolicy or ServiceEntry. The generator inputs are local files or
 Kustomize directories beneath this Kustomization directory. Application rendering
