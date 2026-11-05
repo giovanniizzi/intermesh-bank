@@ -78,6 +78,31 @@ create, update or delete the AuthorizationPolicies; the
 [shared application base](../kustomization.yaml) retains deployment ownership.
 Compliance reports configuration agreement, not runtime authentication enforcement.
 
+## Internal service discovery
+
+The [`intermesh-discovery-internal`](policy-generator-discovery-internal.yaml)
+Policy observes the active internal
+[`intermesh-backend/intermesh-orchestrator-se`](serviceentry/intermesh-orchestrator-se.yaml)
+ServiceEntry. It references the original source directly, uses the shared
+`placement-all-clusters` Placement and requires `intermesh-ossm-operator` to be
+`Compliant`.
+
+The ServiceEntry retains its ordered subject alternative names:
+
+- `spiffe://cluster.local/ns/intermesh-backend/sa/intermesh-orchestrator-sa`
+- `spiffe://cluster.local/ns/istio-east-west/sa/istio-eastwestgateway-service-account`
+
+The parent Policy and embedded ConfigurationPolicy use `inform`. The observer
+uses `musthave` comparison, with pruning and automatic recreation set to `None`
+and `ignorePending: false`.
+Application Kustomize retains deployment ownership; ACM only observes compliance.
+Compliance does not establish Istio runtime readiness or working service discovery.
+
+The four retired internal ServiceEntry sources for UI, Ledger, Fraud Analytics
+and Channel Hub remain commented out and excluded from application rendering
+and observation. External PostgreSQL and Keycloak ServiceEntries are outside
+this observer's scope.
+
 ## Rendering and validation
 
 From the repository root, render Hub governance with the installed trusted
@@ -87,10 +112,11 @@ PolicyGenerator plugin:
 oc kustomize manifests/ossm --enable-alpha-plugins
 ```
 
-The entrypoint renders eight Policies, eight PlacementBindings and one shared
-Placement. It emits no standalone VirtualService, DestinationRule or AuthorizationPolicy. The
-generator inputs are local files or Kustomize directories beneath this
-Kustomization directory. Application rendering does not require the plugin and
+The entrypoint renders nine Policies, nine PlacementBindings and one shared
+Placement. It emits no standalone VirtualService, DestinationRule,
+AuthorizationPolicy or ServiceEntry. The generator inputs are local files or
+Kustomize directories beneath this Kustomization directory. Application rendering
+does not require the plugin and
 continues to include the VirtualService and each network's DestinationRule directly.
 
 Compliance of the [ingress workload Policy](../infrastructure/mesh/gateways/ingress/README.md)

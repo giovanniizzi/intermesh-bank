@@ -1,0 +1,25 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-discovery-internal-generator
+placementBindingDefaults:
+  name: binding-intermesh-discovery-internal
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: inform
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  placement:
+    placementName: placement-all-clusters
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-ossm-operator
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+policies:
+  - name: intermesh-discovery-internal
+    manifests:
+      - path: serviceentry/intermesh-orchestrator-se.yaml
