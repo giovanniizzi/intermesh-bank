@@ -6,6 +6,12 @@ metadata:
 spec:
   disabled: false
   remediationAction: inform
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-ossm-operator
+      namespace: open-cluster-management-policies
+      compliance: Compliant
   policy-templates:
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -14,12 +20,14 @@ spec:
           name: config-policy-fraud-analytics-chaos
         spec:
           remediationAction: inform
+          pruneObjectBehavior: None
           namespaceSelector:
             include:
               - intermesh-backend
           severity: high
           object-templates:
             - complianceType: musthave
+              recreateOption: None
               objectDefinition:
                 apiVersion: networking.istio.io/v1beta1
                 kind: VirtualService

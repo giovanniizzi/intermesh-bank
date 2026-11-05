@@ -6,6 +6,17 @@ metadata:
 spec:
   disabled: false
   remediationAction: inform
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-ossm-operator
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-infra-ns-ingress
+      namespace: open-cluster-management-policies
+      compliance: Compliant
   policy-templates:
     - objectDefinition:
         apiVersion: policy.open-cluster-management.io/v1
@@ -14,6 +25,7 @@ spec:
           name: config-policy-orchestrator-session
         spec:
           remediationAction: inform
+          pruneObjectBehavior: None
           namespaceSelector:
             exclude:
               - kube-*
@@ -25,6 +37,7 @@ spec:
           severity: high
           object-templates:
             - complianceType: musthave
+              recreateOption: None
               objectDefinition:
                 apiVersion: networking.istio.io/v1alpha3
                 kind: Gateway
@@ -45,6 +58,7 @@ spec:
                         - intermesh-orchestrator.session.intermesh.com
                         - '*.intermesh-orchestrator.intermesh-backend.svc.cluster.local'
             - complianceType: musthave
+              recreateOption: None
               objectDefinition:
                 apiVersion: networking.istio.io/v1
                 kind: VirtualService
