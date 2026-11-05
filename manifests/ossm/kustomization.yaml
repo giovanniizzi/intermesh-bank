@@ -6,3 +6,7 @@ resources:
   - istio-gateway.yaml
   - acm-fraud-analytics-vs.yaml
   - orchestrator-session.yaml
+
+generators:
+  - policy-generator-ingress-network1.yaml
+  - policy-generator-ingress-network2.yaml
