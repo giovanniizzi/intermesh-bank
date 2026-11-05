@@ -56,11 +56,25 @@ through the shared `placement-all-clusters` Placement. The AuthorizationPolicy
 selects Orchestrator and denies requests without an authenticated request principal
 on workload port `8080`.
 
-The observer references the original manifest directly and requires the shared
+The same observer includes four ALLOW AuthorizationPolicies, for five observed
+resources in total:
+
+- [`allow-ingress-to-orchestrator`](policies/allow-hub-to-orchestrator.yaml).
+- [`allow-ingress-to-frontend`](policies/allow-ingress-to-ui-api.yaml).
+- [`orchestrator-to-ledger`](policies/allow-orchestrator-to-ledger.yaml).
+- [`rbac-fraud-analytics`](policies/allow-orchestrator-to-analytics.yaml).
+
+The frontend source also contains `allow-ingress-to-intermesh-channel-hub`.
+A targeted `$patch: delete` excludes that document only from PolicyGenerator
+input; it does not remove it from application rendering or delete it from a
+cluster. Issuer-dependent RequestAuthentication and `require-jwt-policy`
+governance are outside this observer's scope.
+
+The observer references the original manifests directly and requires the shared
 `intermesh-ossm-operator` Policy to be `Compliant`. Its parent Policy and embedded
 ConfigurationPolicy use `inform`, with `musthave` comparison, pruning and
 automatic recreation set to `None`, and `ignorePending: false`. ACM does not
-create, update or delete the AuthorizationPolicy; the
+create, update or delete the AuthorizationPolicies; the
 [shared application base](../kustomization.yaml) retains deployment ownership.
 Compliance reports configuration agreement, not runtime authentication enforcement.
 
