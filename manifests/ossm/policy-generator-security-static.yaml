@@ -1,0 +1,41 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-security-static-generator
+placementBindingDefaults:
+  name: binding-intermesh-security-static
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: enforce
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  placement:
+    placementName: placement-all-clusters
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-ossm-operator
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-app-foundation
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+policies:
+  - name: intermesh-security-static
+    manifests:
+      - path: policies/deny-orchestrator-without-jwt.yaml
+      - path: policies/allow-hub-to-orchestrator.yaml
+      - path: policies/allow-ingress-to-ui-api.yaml
+        patches:
+          - apiVersion: security.istio.io/v1beta1
+            kind: AuthorizationPolicy
+            metadata:
+              name: allow-ingress-to-intermesh-channel-hub
+              namespace: intermesh-backend
+            $patch: delete
+      - path: policies/allow-orchestrator-to-ledger.yaml
+      - path: policies/allow-orchestrator-to-analytics.yaml

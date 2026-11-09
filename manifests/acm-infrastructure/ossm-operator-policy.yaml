@@ -1,0 +1,39 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: intermesh-ossm-operator
+  namespace: open-cluster-management-policies
+spec:
+  disabled: false
+  remediationAction: enforce
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: intermesh-ossm-operator-installation
+        spec:
+          remediationAction: enforce
+          severity: high
+          complianceType: musthave
+          upgradeApproval: None
+          subscription:
+            name: servicemeshoperator3
+            namespace: openshift-operators
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+            channel: stable-3.4
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-intermesh-ossm-operator
+  namespace: open-cluster-management-policies
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: intermesh-ossm-operator
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-all-clusters

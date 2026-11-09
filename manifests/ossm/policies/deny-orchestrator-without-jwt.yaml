@@ -1,0 +1,17 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-orchestrator-without-jwt
+  namespace: intermesh-backend
+spec:
+  selector:
+    matchLabels:
+      app: intermesh-orchestrator
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notRequestPrincipals: ["*"]
+    to:
+    - operation:
+        ports: ["8080"]

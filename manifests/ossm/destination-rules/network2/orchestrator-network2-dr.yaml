@@ -1,0 +1,13 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: intermesh-orchestrator-dr-network2
+  namespace: intermesh-backend
+spec:
+  host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
+  trafficPolicy:
+    loadBalancer:
+      consistentHash:
+        httpCookie:
+          name: network2.session
+          ttl: 0s

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intermesh-orchestrator
+  namespace: intermesh-backend
+  labels:
+    app: intermesh-orchestrator
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: intermesh-orchestrator
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: intermesh-orchestrator
+        version: v1
+    spec:
+      serviceAccountName: intermesh-orchestrator-sa
+      containers:
+      - name: orchestrator
+        image: intermesh-orchestrator:1.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: MP_JWT_VERIFY_ISSUER
+          value: "https://keycloak.example.invalid/realms/intermesh-bank"
+        - name: QUARKUS_REST_CLIENT_LEDGER_API_URL
+          value: "http://intermesh-ledger.intermesh-backend.svc.cluster.local:8080"
+        - name: FRAUD_ANALYTICS_URL
+          value: "http://fraud-analytics.intermesh-backend.svc.cluster.local:8080"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"

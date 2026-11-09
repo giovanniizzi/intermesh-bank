@@ -1,0 +1,40 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-istio-network2-generator
+placementBindingDefaults:
+  name: binding-intermesh-istio-network2
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: enforce
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  placement:
+    placementName: placement-intermesh-network2
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-ossm-operator
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-infra-ns-ingress
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-istio-cni
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-network2-identity
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+policies:
+  - name: intermesh-istio-network2
+    manifests:
+      - path: network2

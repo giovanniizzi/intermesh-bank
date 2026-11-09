@@ -1,0 +1,540 @@
+package it.intermesh.bank.security;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
+import java.io.IOException;
+import java.math.BigInteger;
+import java.math.BigDecimal;
+import java.util.UUID;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.Signature;
+import java.security.interfaces.RSAPublicKey;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleManager {
+
+    private final ObjectMapper json = new ObjectMapper();
+    private final AtomicInteger ledgerCalls = new AtomicInteger();
+    private final AtomicInteger jwksCalls = new AtomicInteger();
+    private final AtomicInteger fraudCalls = new AtomicInteger();
+    private final AtomicInteger accountLookups = new AtomicInteger();
+    private final AtomicInteger historyCalls = new AtomicInteger();
+    private final AtomicReference<String> lastLookupAccount = new AtomicReference<>("");
+    private final AtomicReference<String> lastHistoryAccount = new AtomicReference<>("");
+    private final AtomicReference<String> lastOwner = new AtomicReference<>("");
+    private final AtomicInteger recoveryCalls = new AtomicInteger();
+    private final AtomicReference<Map<String, String>> identityHeaders = new AtomicReference<>(Map.of());
+    private final Map<String, SyntheticAdmission> admissions = new ConcurrentHashMap<>();
+    private final AtomicReference<String> admissionRejection = new AtomicReference<>();
+    private final AtomicReference<String> recoveryResponseBody = new AtomicReference<>();
+    private final AtomicInteger freezeCalls = new AtomicInteger();
+    private final AtomicInteger commitCalls = new AtomicInteger();
+    private final AtomicInteger unfreezeCalls = new AtomicInteger();
+    private final AtomicInteger mutationCalls = new AtomicInteger();
+    private final AtomicInteger freezeStatus = new AtomicInteger(200);
+    private final AtomicInteger fraudStatus = new AtomicInteger(200);
+    private final AtomicInteger commitStatus = new AtomicInteger(200);
+    private final AtomicInteger unfreezeStatus = new AtomicInteger(200);
+    private final AtomicReference<String> freezeResponseBody = new AtomicReference<>();
+    private final Map<String, String> transferResponseModes = new ConcurrentHashMap<>();
+    private final AtomicReference<BigDecimal> availableBalance = new AtomicReference<>(new BigDecimal("100.00"));
+    private final AtomicReference<BigDecimal> frozenBalance = new AtomicReference<>(new BigDecimal("0.00"));
+    private final Map<String, SyntheticTransaction> transactions = new ConcurrentHashMap<>();
+    private final AtomicReference<String> commitResponseBody = new AtomicReference<>();
+    private final List<String> transferCalls = new CopyOnWriteArrayList<>();
+    private final AtomicReference<Map<String, Object>> freezeRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> fraudRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> commitRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> unfreezeRequest = new AtomicReference<>(Map.of());
+    private final AtomicReference<Map<String, Object>> creationRequest = new AtomicReference<>(Map.of());
+    private HttpServer server;
+    private URI baseUri;
+    private KeyPair signingKey;
+    private KeyPair untrustedKey;
+    private ExecutorService executor;
+    private volatile CountDownLatch blocked = new CountDownLatch(0);
+    private volatile CountDownLatch release = new CountDownLatch(0);
+
+    @Override
+    public Map<String, String> start() {
+        try {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            signingKey = generator.generateKeyPair();
+            untrustedKey = generator.generateKeyPair();
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            executor = Executors.newCachedThreadPool();
+            server.setExecutor(executor);
+            baseUri = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+            server.createContext("/realms/intermesh-bank/protocol/openid-connect/certs", this::jwks);
+            server.createContext("/test/token", this::token);
+            server.createContext("/test/reset", exchange -> {
+                ledgerCalls.set(0);
+                fraudCalls.set(0);
+                accountLookups.set(0);
+                historyCalls.set(0);
+                lastLookupAccount.set("");
+                lastHistoryAccount.set("");
+                lastOwner.set("");
+                resetTransfers();
+                release.countDown();
+                blocked = new CountDownLatch(0);
+                exchange.sendResponseHeaders(204, -1);
+                exchange.close();
+            });
+            server.createContext("/test/ledger-calls", exchange -> respond(exchange, 200,
+                    Map.of("count", ledgerCalls.get(), "owner", lastOwner.get(), "jwksCalls", jwksCalls.get(),
+                            "fraudCalls", fraudCalls.get(), "blocked", blocked.getCount() == 0,
+                            "accountLookups", accountLookups.get(), "historyCalls", historyCalls.get(),
+                            "lookupAccount", lastLookupAccount.get(), "historyAccount", lastHistoryAccount.get(),
+                            "transfer", transferSnapshot())));
+            server.createContext("/test/transfer-outcomes", exchange -> {
+                Map<String, Object> settings = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
+                freezeStatus.set(((Number) settings.getOrDefault("freeze", 200)).intValue());
+                fraudStatus.set(((Number) settings.getOrDefault("fraud", 200)).intValue());
+                commitStatus.set(((Number) settings.getOrDefault("commit", 200)).intValue());
+                unfreezeStatus.set(((Number) settings.getOrDefault("unfreeze", 200)).intValue());
+                freezeResponseBody.set((String) settings.get("freezeBody"));
+                admissionRejection.set((String) settings.get("admissionRejection"));
+                recoveryResponseBody.set((String) settings.get("recoveryBody"));
+                commitResponseBody.set((String) settings.get("commitBody"));
+                for (String operation : List.of("freeze", "commit", "unfreeze")) {
+                    transferResponseModes.put(operation, (String) settings.getOrDefault(operation + "Mode", "normal"));
+                }
+                respond(exchange, 200, Map.of());
+            });
+            server.createContext("/test/block", exchange -> {
+                blocked = new CountDownLatch(1);
+                release = new CountDownLatch(1);
+                respond(exchange, 200, Map.of());
+            });
+            server.createContext("/test/release", exchange -> {
+                release.countDown();
+                respond(exchange, 200, Map.of());
+            });
+            server.createContext("/v1/ledger", this::ledger);
+            server.createContext("/v2/fraud", exchange -> {
+                fraudCalls.incrementAndGet();
+                transferCalls.add("fraud");
+                fraudRequest.set(json.readValue(exchange.getRequestBody(), new TypeReference<>() {}));
+                respond(exchange, fraudStatus.get(), Map.of());
+            });
+            server.start();
+            return Map.of(
+                    "mp.jwt.verify.issuer", baseUri + "/realms/intermesh-bank",
+                    "ledger-service/mp-rest/url", baseUri.toString(),
+                    "fraud-service/mp-rest/url", baseUri.toString(),
+                    "quarkus.http.session.timeout", "PT10S");
+        } catch (IOException | GeneralSecurityException e) {
+            stop();
+            throw new IllegalStateException("Cannot start synthetic JWT test fixtures", e);
+        }
+    }
+
+    @Override
+    public void inject(TestInjector injector) {
+        injector.injectIntoFields(baseUri, new TestInjector.MatchesType(URI.class));
+    }
+
+    @Override
+    public void stop() {
+        release.countDown();
+        if (server != null) {
+            server.stop(0);
+        }
+        if (executor != null) {
+            executor.shutdownNow();
+        }
+    }
+
+    private void jwks(HttpExchange exchange) throws IOException {
+        jwksCalls.incrementAndGet();
+        RSAPublicKey key = (RSAPublicKey) signingKey.getPublic();
+        respond(exchange, 200, Map.of("keys", List.of(Map.of(
+                "kty", "RSA", "use", "sig", "alg", "RS256", "kid", "synthetic-key",
+                "n", unsigned(key.getModulus()), "e", unsigned(key.getPublicExponent())))));
+    }
+
+    private String unsigned(BigInteger value) {
+        byte[] bytes = value.toByteArray();
+        if (bytes[0] == 0) {
+            bytes = Arrays.copyOfRange(bytes, 1, bytes.length);
+        }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private void token(HttpExchange exchange) throws IOException {
+        Map<String, Object> claims = json.readValue(exchange.getRequestBody(), new TypeReference<>() {});
+        Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
+        String header = encoder.encodeToString(json.writeValueAsBytes(
+                Map.of("alg", "RS256", "typ", "JWT", "kid", "synthetic-key")));
+        String payload = encoder.encodeToString(json.writeValueAsBytes(claims));
+        String input = header + "." + payload;
+        try {
+            Signature signer = Signature.getInstance("SHA256withRSA");
+            boolean invalidSignature = exchange.getRequestURI().getPath().endsWith("/invalid-signature");
+            signer.initSign((invalidSignature ? untrustedKey : signingKey).getPrivate());
+            signer.update(input.getBytes(StandardCharsets.US_ASCII));
+            byte[] body = (input + "." + encoder.encodeToString(signer.sign()))
+                    .getBytes(StandardCharsets.US_ASCII);
+            exchange.getResponseHeaders().set("Content-Type", "text/plain");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        } catch (GeneralSecurityException e) {
+            throw new IOException("Cannot sign synthetic test token", e);
+        }
+    }
+
+    private void ledger(HttpExchange exchange) throws IOException {
+        ledgerCalls.incrementAndGet();
+        String prefix = "/v1/ledger/accounts/";
+        String path = exchange.getRequestURI().getRawPath();
+        if (exchange.getRequestMethod().equals("POST")) {
+            if (path.equals("/v1/ledger/accounts")) {
+                Map<String, Object> request = readMonetaryRequest(exchange);
+                creationRequest.set(request);
+                String owner = (String) request.get("user_id");
+                lastOwner.set(owner);
+                respond(exchange, 200, account(owner));
+            } else if (path.equals("/v1/ledger/freeze") || path.equals("/v1/ledger/commit")
+                    || path.equals("/v1/ledger/unfreeze")) {
+                financialOperation(exchange, path.substring("/v1/ledger/".length()));
+            } else {
+                respond(exchange, 500, Map.of("error", "Unexpected Ledger operation"));
+            }
+            return;
+        }
+        if (exchange.getRequestMethod().equals("GET") && path.startsWith("/v1/ledger/transfer-requests/")) {
+            recover(exchange, path.substring("/v1/ledger/transfer-requests/".length()));
+            return;
+        }
+        String accountPrefix = "/v1/ledger/account/";
+        if (exchange.getRequestMethod().equals("GET") && path.startsWith(accountPrefix)) {
+            if (path.endsWith("/balance")) {
+                String id = URLDecoder.decode(path.substring(accountPrefix.length(), path.length() - "/balance".length()),
+                        StandardCharsets.UTF_8);
+                accountLookups.incrementAndGet();
+                lastLookupAccount.set(id);
+                transferCalls.add("lookup:" + id);
+                if (id.equals("ACC-MISSING")) {
+                    respond(exchange, 404, Map.of("error", "Synthetic upstream detail"));
+                } else if (id.equals("ACC-LOOKUP-500") || id.equals("ACC-LOOKUP-503")) {
+                    respond(exchange, id.endsWith("500") ? 500 : 503, Map.of("error", "Synthetic upstream detail"));
+                } else if (id.equals("ACC-NULL")) {
+                    respond(exchange, 200, null);
+                } else if (id.equals("ACC-NO-OWNER")) {
+                    respond(exchange, 200, Map.of("account_id", id));
+                } else if (id.equals("ACC-NO-ID")) {
+                    respond(exchange, 200, Map.of("user_id", "user-a"));
+                } else if (id.equals("ACC-MALFORMED")) {
+                    respond(exchange, 200, List.of(account("user-a", id)));
+                } else if (id.equals("ACC-WRONG-ID")) {
+                    respond(exchange, 200, account("user-a", "ACC-OTHER"));
+                } else {
+                    String owner = switch (id) {
+                        case "ACC-BOB" -> "user-b";
+                        case "ACC-CASE" -> "User-A";
+                        case "ACC-PADDED" -> " user-a ";
+                        case "ACC-BLANK-OWNER" -> " ";
+                        default -> "user-a";
+                    };
+                    respond(exchange, 200, account(owner, id));
+                }
+                return;
+            }
+            if (path.endsWith("/transactions")) {
+                String id = URLDecoder.decode(path.substring(accountPrefix.length(), path.length() - "/transactions".length()),
+                        StandardCharsets.UTF_8);
+                historyCalls.incrementAndGet();
+                lastHistoryAccount.set(id);
+                if (id.equals("ACC-HISTORY-FAIL")) {
+                    respond(exchange, 503, Map.of("error", "Synthetic upstream detail"));
+                } else if (id.equals("ACC-NULL-HISTORY")) {
+                    respond(exchange, 200, null);
+                } else if (id.equals("ACC-TEST") || id.equals("ACC-EMPTY")) {
+                    respond(exchange, 200, List.of());
+                } else {
+                    respond(exchange, 200, List.of(Map.of("transaction_id", "TX-" + id,
+                            "target_iban", "TEST-TARGET-IBAN", "amount", 12.5, "status", "COMMITTED",
+                            "timestamp", "2026-01-01 12:00:00+00")));
+                }
+                return;
+            }
+            respond(exchange, 500, Map.of("error", "Unexpected Ledger operation"));
+            return;
+        }
+        if (!exchange.getRequestMethod().equals("GET") || !path.startsWith(prefix)) {
+            respond(exchange, 500, Map.of("error", "Unexpected Ledger operation"));
+            return;
+        }
+        String owner = URLDecoder.decode(path.substring(prefix.length()), StandardCharsets.UTF_8);
+        lastOwner.set(owner);
+        if (blocked.getCount() != 0 && owner.equals("user-a")) {
+            blocked.countDown();
+            try {
+                if (!release.await(15, TimeUnit.SECONDS)) {
+                    respond(exchange, 500, Map.of("error", "Test release timed out"));
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Test interrupted", e);
+            }
+        }
+        if (owner.equals("missing-user")) {
+            respond(exchange, 200, List.of());
+            return;
+        }
+        respond(exchange, 200, List.of(account(owner)));
+    }
+
+    private Map<String, Object> account(String owner) {
+        return account(owner, "ACC-TEST");
+    }
+
+    private void resetTransfers() {
+        recoveryCalls.set(0);
+        identityHeaders.set(Map.of());
+        admissions.clear();
+        admissionRejection.set(null);
+        recoveryResponseBody.set(null);
+        freezeCalls.set(0);
+        commitCalls.set(0);
+        unfreezeCalls.set(0);
+        mutationCalls.set(0);
+        freezeStatus.set(200);
+        fraudStatus.set(200);
+        commitStatus.set(200);
+        unfreezeStatus.set(200);
+        freezeResponseBody.set(null);
+        commitResponseBody.set(null);
+        transactions.clear();
+        transferResponseModes.clear();
+        availableBalance.set(new BigDecimal("100.00"));
+        frozenBalance.set(new BigDecimal("0.00"));
+        transferCalls.clear();
+        freezeRequest.set(Map.of());
+        fraudRequest.set(Map.of());
+        commitRequest.set(Map.of());
+        unfreezeRequest.set(Map.of());
+        creationRequest.set(Map.of());
+    }
+
+    private Map<String, Object> transferSnapshot() {
+        return Map.ofEntries(
+                Map.entry("recoveryCalls", recoveryCalls.get()), Map.entry("identityHeaders", identityHeaders.get()),
+                Map.entry("freezeCalls", freezeCalls.get()), Map.entry("commitCalls", commitCalls.get()),
+                Map.entry("unfreezeCalls", unfreezeCalls.get()), Map.entry("mutationCalls", mutationCalls.get()),
+                Map.entry("transactions", Map.copyOf(transactions)),
+                Map.entry("balance", availableBalance.get()), Map.entry("frozen", frozenBalance.get()),
+                Map.entry("calls", List.copyOf(transferCalls)), Map.entry("freezeRequest", freezeRequest.get()),
+                Map.entry("fraudRequest", fraudRequest.get()), Map.entry("commitRequest", commitRequest.get()),
+                Map.entry("unfreezeRequest", unfreezeRequest.get()), Map.entry("creationRequest", creationRequest.get()));
+    }
+
+    private Map<String, Object> readMonetaryRequest(HttpExchange exchange) throws IOException {
+        return json.readerFor(new TypeReference<Map<String, Object>>() {})
+                .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS).readValue(exchange.getRequestBody());
+    }
+
+    private record SyntheticAdmission(Map<String, Object> intent, Map<String, String> identity,
+            String transactionId, String rejection) {}
+
+    private Map<String, String> identity(HttpExchange exchange) {
+        Map<String, String> headers = new java.util.LinkedHashMap<>();
+        for (String name : List.of("X-Intermesh-Issuer", "X-Intermesh-Subject", "X-Intermesh-Owner-Key")) {
+            var values = exchange.getRequestHeaders().get(name);
+            if (values == null || values.size() != 1 || values.get(0).isBlank()) return Map.of();
+            headers.put(name, values.get(0));
+        }
+        identityHeaders.set(Map.copyOf(headers));
+        return headers;
+    }
+
+    private Map<String, Object> admissionBody(String id, SyntheticAdmission admission, String status, boolean created) {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("status", status);
+        result.put("transfer_request_id", id);
+        result.put("admission_status", admission.rejection() == null ? "ADMITTED" : "REJECTED");
+        result.put("transaction_id", admission.transactionId());
+        result.put("transaction_state", admission.transactionId() == null ? null : transactions.get(admission.transactionId()).status());
+        result.put("new_transaction_created", created);
+        result.put("duplicate_pending_approved", admission.rejection() == null
+                && Boolean.TRUE.equals(admission.intent().get("allowDuplicatePendingTransfer")));
+        int matching = (int) transactions.values().stream().filter(t -> t.status().equals("PENDING")
+                && t.account_id().equals(admission.intent().get("account_id"))
+                && t.target_iban().equals(admission.intent().get("target_account"))
+                && t.amount().compareTo(new BigDecimal(admission.intent().get("amount").toString())) == 0).count();
+        result.put("matching_pending_count", matching);
+        if (admission.rejection() != null) result.put("rejection_code", admission.rejection());
+        return result;
+    }
+
+    private synchronized void recover(HttpExchange exchange, String id) throws IOException {
+        recoveryCalls.incrementAndGet();
+        Map<String, String> caller = identity(exchange);
+        SyntheticAdmission admission = admissions.get(id.toLowerCase(java.util.Locale.ROOT));
+        if (admission == null || !admission.identity().equals(caller)) {
+            respond(exchange, 404, Map.of("code", "TRANSFER_REQUEST_NOT_FOUND", "error", "not found"));
+        } else if (recoveryResponseBody.get() != null) {
+            respondBody(exchange, 200, recoveryResponseBody.get().replace("REQUEST_ID", id).getBytes(StandardCharsets.UTF_8));
+        } else {
+            respond(exchange, 200, admissionBody(id, admission, "RECOVERED", false));
+        }
+    }
+
+    private record SyntheticTransaction(String account_id, BigDecimal amount, String target_iban, String status) {}
+
+    private synchronized void financialOperation(HttpExchange exchange, String operation) throws IOException {
+        Map<String, Object> request = readMonetaryRequest(exchange);
+        transferCalls.add(operation);
+        int status = switch (operation) {
+            case "freeze" -> { freezeCalls.incrementAndGet(); freezeRequest.set(request); yield freezeStatus.get(); }
+            case "commit" -> { commitCalls.incrementAndGet(); commitRequest.set(request); yield commitStatus.get(); }
+            case "unfreeze" -> { unfreezeCalls.incrementAndGet(); unfreezeRequest.set(request); yield unfreezeStatus.get(); }
+            default -> throw new IllegalArgumentException("Unexpected test operation");
+        };
+        String mode = transferResponseModes.getOrDefault(operation, "normal");
+        Map<String, String> caller = Map.of();
+        String requestId = null;
+        if (operation.equals("freeze")) {
+            caller = identity(exchange);
+            if (caller.size() != 3 || !(request.get("transfer_request_id") instanceof String id)
+                    || !id.matches("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+                    || !(request.get("allowDuplicatePendingTransfer") instanceof Boolean)
+                    || !request.keySet().equals(java.util.Set.of("transfer_request_id", "account_id", "target_account", "amount", "allowDuplicatePendingTransfer"))) {
+                respond(exchange, 400, Map.of("error", "Invalid admission")); return;
+            }
+            requestId = id.toLowerCase(java.util.Locale.ROOT);
+            SyntheticAdmission previous = admissions.get(requestId);
+            if (previous != null) {
+                if (!previous.identity().equals(caller)) {
+                    respond(exchange, 404, Map.of("code", "TRANSFER_REQUEST_NOT_FOUND", "error", "not found")); return;
+                }
+                if (!previous.intent().equals(request)) {
+                    respond(exchange, 409, Map.of("code", "REQUEST_INTENT_CONFLICT", "error", "conflict")); return;
+                }
+                int code = previous.rejection() == null ? 200 : previous.rejection().equals("INSUFFICIENT_FUNDS") ? 422 : 409;
+                respond(exchange, code, admissionBody(requestId, previous, previous.rejection() == null ? "REPLAYED" : "REJECTED", false)); return;
+            }
+            if (admissionRejection.get() != null) {
+                SyntheticAdmission rejected = new SyntheticAdmission(request, caller, null, admissionRejection.get());
+                admissions.put(requestId, rejected);
+                respond(exchange, rejected.rejection().equals("INSUFFICIENT_FUNDS") ? 422 : 409,
+                        admissionBody(requestId, rejected, "REJECTED", false)); return;
+            }
+        }
+        if (mode.equals("disconnect-before-mutation")) { exchange.close(); return; }
+        if (!(request.get("account_id") instanceof String accountId) || accountId.isBlank()
+                || !(request.get("amount") instanceof Number)) {
+            respond(exchange, 400, Map.of("error", "Invalid transaction reference")); return;
+        }
+        BigDecimal amount = new BigDecimal(request.get("amount").toString());
+        if (amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 2
+                || amount.compareTo(new BigDecimal("9999999999999.99")) > 0) {
+            respond(exchange, 400, Map.of("error", "Invalid monetary amount")); return;
+        }
+        String transactionId;
+        SyntheticTransaction transaction;
+        if (operation.equals("freeze")) {
+            transactionId = "TX-IM-" + UUID.randomUUID();
+            // Valid custom acknowledgments model opaque legacy IDs; malformed
+            // acknowledgments leave the real generated ID unknown to the caller.
+            String customBody = freezeResponseBody.get();
+            if (customBody != null) {
+                try {
+                    var node = json.readTree(customBody).path("transaction_id");
+                    if (node.isTextual() && !node.textValue().isBlank()) transactionId = node.textValue();
+                } catch (Exception ignored) { }
+            }
+            transaction = new SyntheticTransaction(accountId, amount, (String) request.getOrDefault("target_account", ""), "PENDING");
+        } else {
+            if (!(request.get("transaction_id") instanceof String id) || id.isBlank()
+                    || !request.keySet().equals(java.util.Set.of("transaction_id", "account_id", "amount"))) {
+                respond(exchange, 400, Map.of("error", "Invalid transaction reference")); return;
+            }
+            transactionId = id;
+            transaction = transactions.get(id);
+            if (transaction == null || !transaction.account_id().equals(accountId)) {
+                respond(exchange, 404, Map.of("error", "Transaction not found")); return;
+            }
+            if (!transaction.status().equals("PENDING") || transaction.amount().compareTo(amount) != 0
+                    || frozenBalance.get().compareTo(transaction.amount()) < 0) {
+                respond(exchange, 409, Map.of("error", "Transaction conflict")); return;
+            }
+        }
+        if (status == 200 && !mode.equals("acknowledge-only")) {
+            mutationCalls.incrementAndGet();
+            BigDecimal recorded = transaction.amount();
+            switch (operation) {
+                case "freeze" -> {
+                    availableBalance.updateAndGet(value -> value.subtract(recorded));
+                    frozenBalance.updateAndGet(value -> value.add(recorded));
+                    transactions.put(transactionId, transaction);
+                    admissions.put(requestId, new SyntheticAdmission(request, caller, transactionId, null));
+                }
+                case "commit" -> {
+                    frozenBalance.updateAndGet(value -> value.subtract(recorded));
+                    transactions.put(transactionId, new SyntheticTransaction(accountId, recorded, transaction.target_iban(), "APPROVED"));
+                }
+                case "unfreeze" -> {
+                    availableBalance.updateAndGet(value -> value.add(recorded));
+                    frozenBalance.updateAndGet(value -> value.subtract(recorded));
+                    transactions.put(transactionId, new SyntheticTransaction(accountId, recorded, transaction.target_iban(), "FAILED"));
+                }
+                default -> throw new IllegalArgumentException("Unexpected test operation");
+            }
+        }
+        if (mode.equals("disconnect-after-mutation")) { exchange.close(); return; }
+        String body = operation.equals("freeze") ? freezeResponseBody.get()
+                : operation.equals("commit") ? commitResponseBody.get() : null;
+        if (body != null) {
+            respondBody(exchange, status, body.replace("REQUEST_ID", requestId == null ? "" : requestId).getBytes(StandardCharsets.UTF_8));
+        } else if (operation.equals("unfreeze")) {
+            respond(exchange, status, Map.of());
+        } else if (operation.equals("freeze") && status == 200) {
+            respond(exchange, status, admissionBody(requestId, admissions.get(requestId), "FROZEN", true));
+        } else {
+            respond(exchange, status, Map.of("status", "COMMITTED", "transaction_id", transactionId));
+        }
+    }
+
+    private Map<String, Object> account(String owner, String id) {
+        return Map.of(
+                "account_id", id, "user_id", owner, "iban", "TEST-IBAN",
+                "holder_name", "Test Account", "balance", 100.0, "frozen_balance", 0.0);
+    }
+
+    private void respond(HttpExchange exchange, int status, Object value) throws IOException {
+        respondBody(exchange, status, json.writeValueAsBytes(value));
+    }
+
+    private void respondBody(HttpExchange exchange, int status, byte[] body) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, body.length);
+        exchange.getResponseBody().write(body);
+        exchange.close();
+    }
+}

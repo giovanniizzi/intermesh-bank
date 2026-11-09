@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ACM Hub governance only; generated Istio resources belong to managed clusters.
+resources:
+  - istio-gateway.yaml
+  - acm-fraud-analytics-vs.yaml
+  - orchestrator-session.yaml
+
+generators:
+  - policy-generator-ingress-network1.yaml
+  - policy-generator-ingress-network2.yaml
+  - policy-generator-affinity-network1.yaml
+  - policy-generator-affinity-network2.yaml
+  - policy-generator-security-static.yaml
+  - policy-generator-discovery-internal.yaml
+  - policy-generator-discovery-external.yaml
+  - policy-generator-security-oidc.yaml

@@ -1,0 +1,95 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: orchestrator-session
+  namespace: open-cluster-management-policies
+spec:
+  disabled: false
+  remediationAction: enforce
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-ossm-operator
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-infra-ns-ingress
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: config-policy-orchestrator-session
+        spec:
+          remediationAction: enforce
+          pruneObjectBehavior: None
+          namespaceSelector:
+            exclude:
+              - kube-*
+              - openshift-*
+              - default
+            include:
+              - istio-east-west
+              - istio-ingress
+          severity: high
+          object-templates:
+            - complianceType: musthave
+              recreateOption: None
+              objectDefinition:
+                apiVersion: networking.istio.io/v1alpha3
+                kind: Gateway
+                metadata:
+                  name: east-west-https-gateway
+                  namespace: istio-east-west
+                spec:
+                  selector:
+                    istio: eastwestgateway
+                  servers:
+                    - port:
+                        number: 15443
+                        name: https-tls
+                        protocol: HTTPS
+                      tls:
+                        mode: ISTIO_MUTUAL
+                      hosts:
+                        - intermesh-orchestrator.session.intermesh.com
+                        - '*.intermesh-orchestrator.intermesh-backend.svc.cluster.local'
+            - complianceType: musthave
+              recreateOption: None
+              objectDefinition:
+                apiVersion: networking.istio.io/v1
+                kind: VirtualService
+                metadata:
+                  name: quarkus-eastwest-vs
+                  namespace: istio-east-west
+                spec:
+                  gateways:
+                    - east-west-https-gateway
+                  hosts:
+                    - intermesh-orchestrator.session.intermesh.com
+                  http:
+                    - match:
+                        - uri:
+                            prefix: /api
+                      route:
+                        - destination:
+                            host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
+                            port:
+                              number: 80
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-orchestrator-session
+  namespace: open-cluster-management-policies
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: orchestrator-session
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: placement-all-clusters

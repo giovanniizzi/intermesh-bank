@@ -1,0 +1,3 @@
+FROM scratch
+
+COPY target/wasm32-wasip1/release/security_headers_wasmplugin.wasm plugin.wasm

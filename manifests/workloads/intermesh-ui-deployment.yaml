@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intermesh-ui
+  namespace: intermesh-frontend
+  labels:
+    app: intermesh-ui
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: intermesh-ui
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: intermesh-ui
+        version: v1
+    spec:
+      serviceAccountName: intermesh-ui-sa
+      containers:
+      - name: web-frontend
+        image: intermesh-ui:1.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: KEYCLOAK_URL
+          value: "https://keycloak.example.invalid"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"

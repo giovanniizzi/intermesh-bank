@@ -1,0 +1,21 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-app-foundation-generator
+placementBindingDefaults:
+  name: binding-intermesh-app-foundation
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: enforce
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  placement:
+    placementName: placement-all-clusters
+policies:
+  - name: intermesh-app-foundation
+    manifests:
+      - path: namespaces.yaml
+      - path: intermesh-frontend-sa.yaml
+      - path: intermesh-backend-sa.yaml

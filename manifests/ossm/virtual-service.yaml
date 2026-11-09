@@ -1,0 +1,29 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: ingress-routing-mesh
+  namespace: istio-ingress
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - ingress-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api
+    rewrite:
+        authority: intermesh-orchestrator.session.intermesh.com
+    route:
+    - destination:
+        host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
+        port:
+          number: 80
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: intermesh-ui.intermesh-frontend.svc.cluster.local
+        port:
+          number: 80

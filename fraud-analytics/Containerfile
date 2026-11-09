@@ -1,0 +1,18 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+LABEL maintainer="Giovanni Luca Izzi <gizzi@redhat.com>" \
+      application="fraud-analytics" \
+      tier="security-antifrode"
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir fastapi uvicorn pydantic
+
+COPY app.py .
+
+EXPOSE 8080
+
+# Explicitly stated for visual symmetry and compliance auditing
+USER 1001
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]

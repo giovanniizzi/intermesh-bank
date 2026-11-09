@@ -1,0 +1,30 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: intermesh-routing-network1-generator
+placementBindingDefaults:
+  name: binding-intermesh-routing-network1
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: enforce
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  placement:
+    placementName: placement-intermesh-network1
+  dependencies:
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: intermesh-ingress-network1
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+    - apiVersion: policy.open-cluster-management.io/v1
+      kind: Policy
+      name: istio-gateway
+      namespace: open-cluster-management-policies
+      compliance: Compliant
+policies:
+  - name: intermesh-routing-network1
+    manifests:
+      - path: virtual-service.yaml

@@ -1,0 +1,13 @@
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: jwt-keycloak-auth
+  namespace: intermesh-backend
+spec:
+  selector:
+    matchLabels:
+      app: intermesh-orchestrator
+  jwtRules:
+  - issuer: "https://keycloak.example.invalid/realms/intermesh-bank"
+    jwksUri: "https://keycloak.example.invalid/realms/intermesh-bank/protocol/openid-connect/certs"
+    forwardOriginalToken: true

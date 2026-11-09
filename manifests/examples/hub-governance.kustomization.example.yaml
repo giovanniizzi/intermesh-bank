@@ -1,0 +1,121 @@
+# Copy to .local/hub-governance/kustomization.yaml.
+# Complete ServiceEntry and OIDC definitions must match across the private networks.
+# Replace the five illustrative replacement values using the effective application
+# configuration; keep the identity and public-placeholder tests unchanged.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../manifests/ossm
+
+patches:
+  - target:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-discovery-external
+      namespace: open-cluster-management-policies
+    patch: |-
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/apiVersion
+        value: policy.open-cluster-management.io/v1
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/kind
+        value: ConfigurationPolicy
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/metadata/name
+        value: intermesh-discovery-external
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/apiVersion
+        value: networking.istio.io/v1alpha3
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/kind
+        value: ServiceEntry
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/name
+        value: intermesh-external-db
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/namespace
+        value: intermesh-backend
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/hosts/0
+        value: postgres.example.invalid
+      - op: replace
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/hosts/0
+        value: postgres-configure-me.example.invalid
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/apiVersion
+        value: networking.istio.io/v1alpha3
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/kind
+        value: ServiceEntry
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/name
+        value: keycloak-service-entry
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/namespace
+        value: intermesh-backend
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/spec/hosts/0
+        value: keycloak.example.invalid
+      - op: replace
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/spec/hosts/0
+        value: keycloak-configure-me.example.invalid
+  - target:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-security-oidc
+      namespace: open-cluster-management-policies
+    patch: |-
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/apiVersion
+        value: policy.open-cluster-management.io/v1
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/kind
+        value: ConfigurationPolicy
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/metadata/name
+        value: intermesh-security-oidc
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/apiVersion
+        value: security.istio.io/v1beta1
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/kind
+        value: RequestAuthentication
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/name
+        value: jwt-keycloak-auth
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/namespace
+        value: intermesh-backend
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/jwtRules/0/issuer
+        value: https://keycloak.example.invalid/realms/intermesh-bank
+      - op: replace
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/jwtRules/0/issuer
+        value: https://keycloak-configure-me.example.invalid/realms/intermesh-bank
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/jwtRules/0/jwksUri
+        value: https://keycloak.example.invalid/realms/intermesh-bank/protocol/openid-connect/certs
+      - op: replace
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/jwtRules/0/jwksUri
+        value: https://keycloak-configure-me.example.invalid/realms/intermesh-bank/protocol/openid-connect/certs
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/apiVersion
+        value: security.istio.io/v1beta1
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/kind
+        value: AuthorizationPolicy
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/name
+        value: require-jwt-policy
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/namespace
+        value: intermesh-backend
+      - op: test
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/spec/rules/0/from/0/source/requestPrincipals/0
+        value: https://keycloak.example.invalid/realms/intermesh-bank/*
+      - op: replace
+        path: /spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/spec/rules/0/from/0/source/requestPrincipals/0
+        value: https://keycloak-configure-me.example.invalid/realms/intermesh-bank/*

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: intermesh-ledger
+  namespace: intermesh-backend
+  labels:
+    app: intermesh-ledger
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: intermesh-ledger
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: intermesh-ledger
+        version: v1
+    spec:
+      serviceAccountName: intermesh-ledger-sa
+      containers:
+      - name: ledger
+        image: intermesh-ledger:1.0
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: intermesh-ledger-db
+              key: DATABASE_URL
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"

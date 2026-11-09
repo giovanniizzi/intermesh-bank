@@ -1,0 +1,120 @@
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: KeycloakRealmImport
+metadata:
+  name: intermesh-bank-realm-import
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  placeholders:
+    HUB_CLIENT_SECRET:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: HUB_CLIENT_SECRET
+    DEMO_USER_1_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_USER_1_PASSWORD
+    DEMO_USER_2_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_USER_2_PASSWORD
+    DEMO_USER_3_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_USER_3_PASSWORD
+    DEMO_ADMIN_PASSWORD:
+      secret:
+        name: intermesh-keycloak-credentials
+        key: DEMO_ADMIN_PASSWORD
+  realm:
+    id: intermesh-bank
+    realm: intermesh-bank
+    enabled: true
+    duplicateEmailsAllowed: false
+    displayName: "InterMesh Corporate Banking"
+    sslRequired: external
+    groups:
+      - name: admins
+      - name: users
+    roles:
+      realm:
+        - description: Default user role
+          name: user
+        - description: Administrator role
+          name: admin
+    loginWithEmailAllowed: true
+    clients:
+      - clientId: intermesh-frontend
+        enabled: true
+        protocol: openid-connect
+        publicClient: true
+        bearerOnly: false
+        standardFlowEnabled: true
+        directAccessGrantsEnabled: true
+        #rootUrl: "*"
+        #baseUrl: "/"
+        redirectUris:
+          - "https://bank-network1.example.invalid/*"
+          - "https://bank-network2.example.invalid/*"
+        webOrigins:
+          - "https://bank-network1.example.invalid"
+          - "https://bank-network2.example.invalid"
+        attributes:
+          post.logout.redirect.uris: "https://bank-network1.example.invalid##https://bank-network2.example.invalid"
+      - clientId: intermesh-channel-hub
+        enabled: true
+        protocol: openid-connect
+        publicClient: false
+        bearerOnly: false
+        standardFlowEnabled: false
+        serviceAccountsEnabled: true 
+        secret: "${HUB_CLIENT_SECRET}"
+    users:
+      - username: mario.rossi
+        enabled: true
+        firstName: Mario
+        lastName: Rossi
+        email: mario.rossi@intermesh.it
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "${DEMO_USER_1_PASSWORD}"
+            temporary: false
+        realmRoles:
+          - user
+      - username: giovanni.izzi
+        enabled: true
+        firstName: Giovanni Luca
+        lastName: Izzi
+        email: giovanni.izzi@intermesh.it
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "${DEMO_USER_2_PASSWORD}"
+            temporary: false
+        realmRoles:
+          - user
+      - username: john.doe
+        enabled: true
+        firstName: John
+        lastName: Doe
+        email: john.doe@intermesh.it
+        emailVerified: true
+        credentials:
+          - type: password
+            value: "${DEMO_USER_3_PASSWORD}"
+            temporary: false
+        realmRoles:
+          - user
+      - credentials:
+          - temporary: false
+            type: password
+            value: "${DEMO_ADMIN_PASSWORD}"
+        email: admin@demo.redhat.com
+        emailVerified: true
+        enabled: true
+        firstName: Admin
+        lastName: Demo
+        realmRoles:
+          - admin
+        username: admin

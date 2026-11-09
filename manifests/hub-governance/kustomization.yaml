@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Aggregate existing ACM Hub governance without changing resource definitions.
+resources:
+  - ../acm-infrastructure
+  - ../infrastructure
+  - ../infrastructure/network-identity
+  - ../infrastructure/mesh/cni
+  - ../infrastructure/mesh/control-plane
+  - ../infrastructure/mesh/gateways/ingress
+  - ../infrastructure/mesh/gateways/eastwest
+  - ../ossm
+  - ../foundation
+  - ../../overlays/hub-applications

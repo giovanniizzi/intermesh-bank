@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: intermesh-ledger
+  namespace: intermesh-backend
+  labels:
+    app: intermesh-ledger
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  selector:
+    app: intermesh-ledger

@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Hub governance only; applications reference the source manifests directly.
+generators:
+  - policy-generator-foundation.yaml
