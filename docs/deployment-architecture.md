@@ -140,7 +140,7 @@ sequenceDiagram
   Note over B: Authenticate with shared Keycloak
   B->>I: POST /api/v1/transfers with JWT and request ID
   I->>O: Route API request through receiving Sidecar
-  Note over O: Mesh and Quarkus verify JWT; bind session identity
+  Note over O: Verify JWT and bind authenticated session identity
   O->>L: Read source account
   L-->>O: Account ID and owner
   Note over O: Verify requested source ID and owner before writes
@@ -161,7 +161,7 @@ sequenceDiagram
     Note over O: Fraud call failed or timed out
     O->>L: Unfreeze specific transaction
     L->>D: Atomic compensation attempt
-    Note over O,L: Attempt only; acknowledgment does not verify restoration
+    Note over O,L: Compensation acknowledgment does not guarantee restoration
     O-->>I: Conservative compensation result
     I-->>B: Compensation result
   end
