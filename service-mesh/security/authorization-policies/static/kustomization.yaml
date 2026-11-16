@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deny-orchestrator-without-jwt.yaml
+  - allow-hub-to-orchestrator.yaml
+  - allow-ingress-to-ui-api.yaml
+  - allow-orchestrator-to-ledger.yaml
+  - allow-orchestrator-to-analytics.yaml
+
+# Preserve ACM object-template ordering.
+sortOptions:
+  order: fifo

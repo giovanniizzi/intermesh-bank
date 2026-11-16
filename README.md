@@ -1,88 +1,95 @@
 # Intermesh Bank
 
 Intermesh Bank is a banking microservices demonstration for OpenShift Service
-Mesh 3. It combines a browser-based UI, a Quarkus Orchestrator, a Go Ledger,
-Fraud Analytics and a Rust Proxy-Wasm plugin to demonstrate service routing,
-session affinity and workload unavailability across multiple networks.
+Mesh 3. A JavaScript frontend, Quarkus Orchestrator, Go Ledger, Python Fraud
+Analytics service and Rust Proxy-Wasm plugin illustrate how application behavior
+interacts with a multi-primary, multi-network Sidecar mesh.
+
+## What it demonstrates
+
+- Local and cross-network service communication through Istio gateways.
+- HTTP traffic management and cookie-based consistent hashing for session affinity.
+- Separate L4 workload-mTLS passthrough and L7 Orchestrator routing.
+- Traffic fault injection, timeouts and controlled failure scenarios.
+- Transaction-specific compensation and persisted transfer-request recovery
+  without unsafe automatic financial POST retries.
+- Keycloak login with PKCE, mesh and application JWT verification, authenticated
+  session isolation and account-ownership checks.
+- WasmPlugin request-header processing and its interaction with Fraud routing.
+- Declarative deployment through ACM governance or standalone Kustomize profiles.
 
 ## Architecture
 
-The reference deployment uses three OpenShift clusters: an ACM Hub and two
-managed clusters in a multi-primary, multi-network mesh. Both managed clusters
-run UI, Orchestrator, Ledger and Fraud Analytics with the Sidecar data plane.
-The Hub hosts Red Hat Advanced Cluster Management and Red Hat build of Keycloak.
+The diagram shows logical components replicated across two application clusters.
+The reference topology has a third, dedicated Hub cluster hosting ACM and shared
+Red Hat build of Keycloak. Both application clusters use one external PostgreSQL
+database. ACM governance is optional; shared Keycloak is required in either
+deployment mode. Standalone deployment does not require a dedicated ACM Hub;
+Keycloak can run in a separately provisioned hosting environment.
 
 ```mermaid
 flowchart TB
-  BROWSER["Browser: frontend JavaScript"]
-  subgraph HUB["ACM Hub cluster"]
-    ACM["Red Hat Advanced Cluster Management"]
-    SSO["Red Hat build of Keycloak"]
+  B["Browser"]
+  subgraph H["Reference Hub cluster"]
+    KC["Shared Keycloak"]
+    ACM["Optional ACM governance"]
   end
-  subgraph C1["Managed Cluster 1 / network1"]
-    IG1["Ingress Gateway"] -->|"/"| UI1["Intermesh UI"]
-    IG1 -->|"/api"| O1["Orchestrator"]
-    O1 --> L1["Ledger"]
-    O1 --> F1["Fraud Analytics"]
-    EW1["East-West Gateway"]
-  end
-  subgraph C2["Managed Cluster 2 / network2"]
-    IG2["Ingress Gateway"] -->|"/"| UI2["Intermesh UI"]
-    IG2 -->|"/api"| O2["Orchestrator"]
-    O2 --> L2["Ledger"]
-    O2 --> F2["Fraud Analytics"]
-    EW2["East-West Gateway"]
+  subgraph M["Application clusters - network1 and network2 - Sidecar"]
+    IG["Ingress Gateway"]
+    UI["Intermesh UI"]
+    O["Orchestrator"]
+    L["Ledger"]
+    F["Fraud Analytics"]
+    IG -->|"/"| UI
+    IG -->|"/api"| O
+    O --> L
+    O --> F
   end
   DB[("Shared external PostgreSQL")]
-  BROWSER -->|"/ and /api"| IG1
-  BROWSER -->|"/ and /api"| IG2
-  BROWSER <-->|"Shared SSO"| SSO
-  ACM -. "Fraud VirtualService governance" .-> C1
-  ACM -. "Fraud VirtualService governance" .-> C2
-  L1 --> DB
-  L2 --> DB
-  EW1 <-->|"Cross-network service routing"| EW2
+  B -->|"Page and API requests"| IG
+  B -. "OIDC login" .-> KC
+  L --> DB
+  ACM -. "ACM deployment mode" .-> M
 ```
 
-The browser loads the UI through `/` and sends API requests through `/api`
-directly to Orchestrator, which calls Ledger and Fraud Analytics. Both clusters
-use one external PostgreSQL database and shared Keycloak SSO. Cross-network
-service traffic traverses East-West Gateways; dashed links show ACM management.
+The browser loads UI assets through `/` and sends bearer-authenticated `/api`
+requests directly to Orchestrator through ingress. The UI server does not proxy
+API requests. Solid arrows show application traffic; dashed relationships identify
+SSO and governance. See the [deployment architecture](docs/deployment-architecture.md)
+for cluster placement and request sequences.
 
-Each managed cluster uses its own Orchestrator affinity cookie:
-`network1.session` or `network2.session`, alongside the application cookie
-`JSESSIONID`. Channel Hub is retained for future use and is inactive.
+## Getting started
 
-See [deployment architecture](docs/deployment-architecture.md) for resource
-placement, configuration dependencies and deployment prerequisites.
-See [ACM deployment readiness](docs/acm-deployment-readiness.md) for staged Hub
-deployment and runtime verification.
+Choose one deployment owner for each cluster:
 
-## Repository layout
+| Mode | Guide | Public rendering from the repository root |
+| --- | --- | --- |
+| ACM | [Hub governance](deploy/acm/README.md) | `oc kustomize deploy/acm --enable-alpha-plugins` |
+| Standalone | [OpenShift deployment without ACM](deploy/standalone/README.md) | `oc kustomize deploy/standalone/network1` and `oc kustomize deploy/standalone/network2` |
 
-| Path | Purpose |
+Public profiles contain deliberately nonfunctional image and endpoint placeholders.
+Start with the [private configuration examples](docs/examples/README.md), configure
+the shared values under Git-ignored `.local/`, and provision credentials separately.
+There is no repository-root Kustomization. Rendering is offline preparation;
+deployment requires the staged prerequisites and readiness checks in the guides.
+
+## Documentation and repository map
+
+| Path | Read it for |
 | --- | --- |
-| [intermesh-ui/](intermesh-ui/) | Browser frontend and runtime configuration. |
-| [intermesh-orchestrator/](intermesh-orchestrator/) | Backend entry point and downstream service calls. |
-| [intermesh-ledger/](intermesh-ledger/) | Ledger service backed by shared PostgreSQL. |
-| [fraud-analytics/](fraud-analytics/) | Fraud Analytics service. |
-| [security-headers-wasmplugin/](security-headers-wasmplugin/) | Rust Proxy-Wasm implementation and image packaging. |
-| [manifests/](manifests/) | Application, Istio, ACM and Keycloak resource definitions. |
-| [sql/](sql/) | Database fixtures for the fictional banking identities. |
+| [Deployment architecture](docs/deployment-architecture.md) | Topology, application flow, placement and invariants |
+| [Service mesh](service-mesh/README.md) | L4/L7 routing, discovery, affinity, security, Wasm and Fraud behavior |
+| [OpenShift platform](platform/openshift/ossm/README.md) | Operator requirements, control planes and gateway workloads |
+| [ACM deployment runbook](docs/acm-deployment-readiness.md) | Staged propagation and operational verification |
+| [Standalone deployment](deploy/standalone/README.md) | OpenShift installation and validation without ACM |
+| [Configuration examples](docs/examples/README.md) | Private values, Secret provisioning and Keycloak allowlists |
+| [applications/](applications) | Shared workloads, per-network overlays and prerequisites |
+| [src/](src) | Application and Wasm source code |
 
-## Local configuration
+## Development and testing
 
-Keep credentials and environment-specific configuration in the ignored root
-`.local/` directory. Copy the sanitized templates from
-[manifests/examples/](manifests/examples/README.md) there before supplying actual
-values. Use newly generated credentials; passwords, tokens, private keys,
-kubeconfigs and cloud or registry credentials do not belong in source control.
-
-Example files use names such as `postgres-secret.example.yaml` or `.env.example`
-and contain replacement markers rather than usable credentials. An example
-filename does not sanitize its contents, and ignore rules do not load or inject
-configuration into applications.
-
-Removing credentials from current files does not remove them from Git history
-or existing clones. History cleanup is a separate operation; any exposed
-credential that remains valid or was reused also needs to be revoked or rotated.
+Use the [development guide](docs/development.md) for toolchains and build/test
+commands. The [Orchestrator guide](src/intermesh-orchestrator/README.md) covers
+runtime configuration and signed-JWT tests. The
+[local transfer integration test](src/intermesh-ledger/tests/README.md) exercises
+the real Java → Go → PostgreSQL path using isolated synthetic fixtures.

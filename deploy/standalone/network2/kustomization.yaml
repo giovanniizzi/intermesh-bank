@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../applications/prerequisites/kubernetes
+  - ../../../applications/overlays/network2
+  - ../../../platform/openshift/ossm/overlays/network2
+  - ../../../service-mesh/networking/gateways
+  - ../../../service-mesh/traffic-management/virtual-services
+  - ../../../service-mesh/networking/service-entries
+  - ../../../service-mesh/traffic-management/destination-rules/network2
+  - ../../../service-mesh/security/authorization-policies
+  - ../../../service-mesh/security/request-authentications
+  - ../../../service-mesh/wasm

@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Closed workload membership; additions change ACM deployment ownership.
+resources:
+  - intermesh-ui-deployment.yaml
+  - intermesh-ui-service.yaml
+  - intermesh-orchestrator-deployment.yaml
+  - intermesh-orchestrator-service.yaml
+  - intermesh-ledger-deployment.yaml
+  - intermesh-ledger-service.yaml
+  - fraud-analytics-deployment.yaml
+  - fraud-analytics-service.yaml
+
+images:
+  - name: intermesh-orchestrator
+    newName: example.invalid/intermesh-orchestrator
+    newTag: "1.0"
+  - name: intermesh-ui
+    newName: example.invalid/intermesh-ui
+    newTag: "1.0"
+  - name: intermesh-ledger
+    newName: example.invalid/intermesh-ledger
+    newTag: "1.0"
+  - name: fraud-analytics
+    newName: example.invalid/fraud-analytics
+    newTag: "1.0"

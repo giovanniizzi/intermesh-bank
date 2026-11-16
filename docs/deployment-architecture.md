@@ -1,347 +1,268 @@
 # Deployment architecture
 
-Intermesh Bank runs across two OpenShift managed clusters in a multi-primary,
-multi-network OpenShift Service Mesh 3 deployment. A third cluster hosts ACM
-governance and shared Keycloak SSO. Sidecar is the reference data plane.
+Intermesh Bank uses two OpenShift clusters in a multi-primary, multi-network
+OSSM Sidecar mesh. The reference topology includes a dedicated Hub cluster
+hosting shared Keycloak SSO and optional ACM governance. Deployment ownership
+can instead be standalone; the application and mesh definitions are shared.
+Standalone needs shared Keycloak but does not require a dedicated ACM Hub cluster.
+Hub placement below describes the reference topology.
 
-## Cluster roles
-
-| Cluster | Network | Components |
-| --- | --- | --- |
-| ACM Hub | Outside the managed application meshes | Red Hat Advanced Cluster Management, Red Hat build of Keycloak (RHBK) and its Operator. |
-| Managed Cluster 1 | `network1` | Intermesh UI, Orchestrator, Ledger and Fraud Analytics. |
-| Managed Cluster 2 | `network2` | Intermesh UI, Orchestrator, Ledger and Fraud Analytics. |
-
-These names identify deployment roles rather than kubeconfig contexts.
-Both managed clusters use the same external PostgreSQL database. RHBK runs in
-the Hub's `keycloak` namespace and serves both frontends from outside their meshes.
-
-## Request flow
+## Multicluster topology
 
 ```mermaid
 flowchart TB
-  BROWSER["Browser / frontend JavaScript"]
-  subgraph HUB["ACM Hub"]
-    ACM["ACM"]
-    SSO["RHBK: shared SSO"]
+  subgraph H["Hub cluster - outside the application meshes"]
+    ACM["Optional ACM governance"]
+    KC["Shared Keycloak"]
   end
-  subgraph C1["Managed Cluster 1 / network1 / Sidecar"]
-    IG1["Ingress Gateway"] -->|"/"| UI1["Intermesh UI"]
-    IG1 -->|"/api"| O1["Orchestrator"]
-    O1 --> L1["Ledger"]
-    O1 --> F1["Fraud Analytics"]
-    EW1["East-West Gateway"]
+  subgraph N1["Application Cluster 1 - network1"]
+    CP1["Istiod - discovery and xDS"]
+    IG1["Ingress Gateway"]
+    EW1["East-West Gateway workload"]
+    A1["UI, Orchestrator, Ledger, Fraud - with Sidecars"]
+    CP1 -. "Proxy configuration" .-> IG1
+    CP1 -. "Proxy configuration" .-> EW1
+    CP1 -. "Proxy configuration" .-> A1
+    IG1 -->|"Application ingress"| A1
+    EW1 <-->|"Remote service traffic"| A1
   end
-  subgraph C2["Managed Cluster 2 / network2 / Sidecar"]
-    IG2["Ingress Gateway"] -->|"/"| UI2["Intermesh UI"]
-    IG2 -->|"/api"| O2["Orchestrator"]
-    O2 --> L2["Ledger"]
-    O2 --> F2["Fraud Analytics"]
-    EW2["East-West Gateway"]
+  subgraph N2["Application Cluster 2 - network2"]
+    CP2["Istiod - discovery and xDS"]
+    IG2["Ingress Gateway"]
+    EW2["East-West Gateway workload"]
+    A2["UI, Orchestrator, Ledger, Fraud - with Sidecars"]
+    CP2 -. "Proxy configuration" .-> IG2
+    CP2 -. "Proxy configuration" .-> EW2
+    CP2 -. "Proxy configuration" .-> A2
+    IG2 -->|"Application ingress"| A2
+    EW2 <-->|"Remote service traffic"| A2
   end
   DB[("One external PostgreSQL database")]
-  BROWSER -->|"/ and /api"| IG1
-  BROWSER -->|"/ and /api"| IG2
-  BROWSER <-->|"SSO"| SSO
-  ACM -. "Owns Fraud VirtualService" .-> C1
-  ACM -. "Owns Fraud VirtualService" .-> C2
-  L1 --> DB
-  L2 --> DB
-  EW1 <-->|"Cross-network service routing"| EW2
+  ACM -. "Selected Policies" .-> N1
+  ACM -. "Selected Policies" .-> N2
+  KC -. "Shared OIDC configuration" .-> A1
+  KC -. "Shared OIDC configuration" .-> A2
+  A1 -->|"Ledger only"| DB
+  A2 -->|"Ledger only"| DB
+  EW1 <-->|"Logical cross-network routing"| EW2
 ```
 
-The browser loads frontend assets through `/`. Frontend JavaScript sends API
-requests to `/api` on the same origin; ingress routes them directly to
-Orchestrator. The UI workload does not proxy API requests. Orchestrator is the
-backend entry point and calls Ledger and Fraud Analytics.
+Solid links represent application traffic or logical routing capability; dashed,
+labelled links distinguish management, proxy configuration and OIDC dependencies.
+The East-West link summarizes connectivity, not a required hop through both gateway
+Pods. Cross-network service calls traverse the appropriate gateway rather than
+assuming direct Pod-to-Pod connectivity.
 
-Solid links show traffic or logical routing capability; dashed links show
-management. Cross-network service traffic traverses the appropriate East-West
-Gateways. The gateway link summarizes that capability, omitting individual
-workload-to-gateway hops and L7 details. It does not imply direct cross-network
-Pod connectivity or require every cross-cluster request to pass through
-Orchestrator.
+Each network has one East-West workload selected by two Istio Gateways on 15443:
+L4 `AUTO_PASSTHROUGH` for Ledger/Fraud/UI hosts, and a dedicated Orchestrator L7
+`ISTIO_MUTUAL` path. There is no separate L7 gateway Deployment. See
+[mesh routing](../service-mesh/README.md#ingress-and-east-west-routing) for the
+host matching and authority rewrite.
 
-Both managed clusters normally run all four active workloads. Demonstrations
-can stop selected workloads to exercise cross-network routing: an Orchestrator
-in Cluster 2 can reach Ledger in Cluster 1 when the local Ledger is unavailable.
-Both Ledger instances use the same database; this is service routing rather than
-database replication.
+Shared-root trust, per-cluster signing material, reciprocal remote-discovery
+credentials and reachable remote Kubernetes APIs are external prerequisites.
+The sources do not provision them or establish effective Envoy listeners.
 
-Channel Hub is inactive. Its source, manifests, service account and Keycloak
-client remain available for future use, but it is not a runtime dependency or an
-authentication boundary in this architecture.
+## Placement and ownership
 
-## Resources and ownership
-
-### Application workloads
-
-The following Deployment and Service pairs run in both managed clusters:
-
-| Deployment and Service sources | Namespace |
+| Location | Components |
 | --- | --- |
-| Intermesh UI: [Deployment](../manifests/workloads/intermesh-ui-deployment.yaml), [Service](../manifests/workloads/intermesh-ui-service.yaml) | `intermesh-frontend` |
-| Orchestrator: [Deployment](../manifests/workloads/intermesh-orchestrator-deployment.yaml), [Service](../manifests/workloads/intermesh-orchestrator-service.yaml) | `intermesh-backend` |
-| Ledger: [Deployment](../manifests/workloads/intermesh-ledger-deployment.yaml), [Service](../manifests/workloads/intermesh-ledger-service.yaml) | `intermesh-backend` |
-| Fraud Analytics: [Deployment](../manifests/workloads/fraud-analytics-deployment.yaml), [Service](../manifests/workloads/fraud-analytics-service.yaml) | `intermesh-backend` |
+| Hub, `open-cluster-management-policies` | ACM Policies, Placements and PlacementBindings in ACM mode. |
+| Hub, `keycloak` | RHBK and its Operator, Keycloak CR, provisioning Secret and RealmImport. Only the RealmImport is supplied here. |
+| Each cluster, `intermesh-frontend` | UI Deployment, Service and ServiceAccount. |
+| Each cluster, `intermesh-backend` | Orchestrator, Ledger and Fraud Deployments/Services; backend ServiceAccounts, Ledger database Secret and applicable Istio resources. |
+| Each cluster, OSSM namespaces | Control plane, CNI, Ingress and East-West workloads. |
+| Outside OpenShift | One shared PostgreSQL database. |
 
-[namespaces.yaml](../manifests/foundation/namespaces.yaml) requests sidecar injection.
-The [frontend service account](../manifests/foundation/intermesh-frontend-sa.yaml) and
-[backend service accounts](../manifests/foundation/intermesh-backend-sa.yaml) provide local
-workload identities. Injection also requires a configured mesh installation.
-[intermesh-channel-hub.yaml](../manifests/intermesh-channel-hub.yaml) is excluded
-from the active deployment. Its dormant ServiceAccount remains in the canonical
-application rendering and ACM application foundation; it does not activate a
-Channel Hub workload.
+Both clusters normally run all four active application workloads. An Orchestrator
+can use a remote Ledger or Fraud endpoint when the local workload is unavailable;
+this is service routing, not database replication. Under ACM, coordinate outages
+with desired replica values because enforcement can reverse manual scaling. Use
+[workload unavailability and restoration](acm-deployment-readiness.md#workload-unavailability-and-restoration).
 
-### ACM governance and mesh routing
+Channel Hub is inactive. Its source code, ServiceAccount and Keycloak client are
+retained, but it has no deployed workload, Service or AuthorizationPolicy and is
+not an authentication boundary in the active path.
 
-ACM Policy, Placement and PlacementBinding objects live on the Hub in
-`open-cluster-management-policies`. Their generated Istio resources live in the
-managed clusters. RHBK provisioning is separate and uses the Hub's `keycloak`
-namespace.
+### Resource sources
 
-The [Hub deployment overlay](../overlays/hub-deploy/README.md) aggregates the
-infrastructure, application, networking and security governance. ACM reconciles
-these resources on the selected managed clusters; the canonical application
-overlays provide rendering and validation references rather than parallel
-deployment ownership.
-
-| Manifest | Role |
+| Shared source | Responsibility |
 | --- | --- |
-| [acm-fraud-analytics-vs.yaml](../manifests/ossm/acm-fraud-analytics-vs.yaml) | ACM owner of `intermesh-backend/fraud-analytics-chaos` VirtualService in both managed clusters; references `placement-all-clusters`. |
-| [istio-gateway.yaml](../manifests/ossm/istio-gateway.yaml) | ACM Policy containing the Ingress Gateway and L4 East-West `AUTO_PASSTHROUGH` Gateway, plus `placement-all-clusters` and its binding. The Placement selects `ossm-enabled: "true"`. |
-| [orchestrator-session.yaml](../manifests/ossm/orchestrator-session.yaml) | ACM Policy containing the dedicated L7 `ISTIO_MUTUAL` Gateway and `/api` VirtualService for Orchestrator. |
-| [virtual-service.yaml](../manifests/ossm/virtual-service.yaml) | Ingress routes: `/api` to Orchestrator and `/` to UI, in `istio-ingress`. |
-| [virtual-service-east-west.yaml](../manifests/ossm/virtual-service-east-west.yaml) | Fully commented reference; renders no VirtualService and supplies no active routes. |
+| [Application prerequisites](../applications/prerequisites/kubernetes/kustomization.yaml) | Two application Namespaces with injection requested, and five ServiceAccounts. |
+| [Application base](../applications/base/kustomization.yaml) | Four Deployment/Service pairs; [network1](../applications/overlays/network1/kustomization.yaml) and [network2](../applications/overlays/network2/kustomization.yaml) add the Orchestrator `NETWORK` diagnostic value. |
+| [Platform overlays](../platform/openshift/ossm/README.md) | Four infrastructure Namespaces, IstioCNI, Istio and Ingress/East-West workloads: 17 resources per network. |
+| [Mesh resources](../service-mesh/README.md#resource-groups-and-rendering) | Gateways, routes, discovery, one matching DestinationRule, security and Wasm: 18 resources per network. |
+| [Keycloak provisioning](../applications/prerequisites/dependencies/keycloak/kustomization.yaml) | One independent RealmImport for the hosting environment. |
 
-The standalone [fraud-analytics-vs.yaml](../manifests/ossm/fraud-analytics-vs.yaml)
-defines the same resource as the ACM policy with different header matching.
-It is excluded from the active deployment to avoid competing ownership.
-Keep the fraud header matching, fault injection and timeout relationships
-together when changing this demonstration.
+[Standalone profiles](../deploy/standalone/README.md) compose 50 ordinary resources
+per network: seven application prerequisites, eight workloads, 17 platform and
+18 mesh resources. [ACM](../deploy/acm/README.md) governs the same definitions
+through 26 Policies, 26 PlacementBindings and three Placements on the Hub.
+ACM inputs reference contained directory wrappers; resource definitions are not
+copied into a parallel application base. Choose one deployment owner per resource.
 
-### Authentication and authorization
+The Fraud VirtualService is ACM-owned in ACM mode and directly managed in
+standalone mode. RHBK provisioning is independent of either application deployment
+mode; the governance aggregate does not install Keycloak or PostgreSQL.
 
-[RequestAuthentication](../manifests/ossm/jwt-request-authentication.yaml)
-selects Orchestrator, configures the issuer and JWKS URL, and forwards the original
-token. The [JWT AuthorizationPolicy](../manifests/ossm/jwt-authorization-policy.yaml)
-uses the issuer principal prefix.
+## Browser and API routing
 
-The [JWT requirement policy](../manifests/ossm/policies/deny-orchestrator-without-jwt.yaml)
-requires an authenticated request principal for incoming traffic on Orchestrator's
-HTTP port (`8080`) in both managed clusters. At the receiving Sidecar, requests
-without a valid JWT are rejected regardless of caller or path, including
-diagnostic routes. This requirement complements the service-to-service
-authorization rules.
+The browser loads frontend assets through `/`. JavaScript sends bearer-authenticated
+requests to `/api` on the same origin, which ingress routes directly to Orchestrator.
+The UI workload serves static assets and does not forward API requests.
 
-JWT validation authenticates requests at the service mesh layer; it does not
-enforce access to individual banking resources.
+The [ingress VirtualService](../service-mesh/traffic-management/virtual-services/ingress/virtual-service.yaml)
+preserves the API path and rewrites its authority to
+`intermesh-orchestrator.session.intermesh.com`. That routing identity coordinates
+with the [Orchestrator East-West route](../service-mesh/traffic-management/virtual-services/orchestrator/orchestrator-east-west-virtualservice.yaml).
+Service port 80 maps to Orchestrator workload port 8080. Diagnostic `/hello` routes
+exist in Java but are not exposed by the committed ingress API route.
 
-The remaining policy files describe workload and gateway identities:
+### Transfer request sequence
 
-- [allow-hub-to-orchestrator.yaml](../manifests/ossm/policies/allow-hub-to-orchestrator.yaml)
-  declares `allow-ingress-to-orchestrator` for ingress/East-West namespaces;
-  its filename does not introduce a Channel Hub dependency.
-- [allow-ingress-to-ui-api.yaml](../manifests/ossm/policies/allow-ingress-to-ui-api.yaml)
-  contains UI and retained Channel Hub selectors.
-- [allow-orchestrator-to-ledger.yaml](../manifests/ossm/policies/allow-orchestrator-to-ledger.yaml)
-  and [allow-orchestrator-to-analytics.yaml](../manifests/ossm/policies/allow-orchestrator-to-analytics.yaml)
-  allow only the Orchestrator workload principal,
-  `cluster.local/ns/intermesh-backend/sa/intermesh-orchestrator-sa`, on their
-  selected Ledger and Fraud Analytics workloads. Neither policy allows the
-  East-West Gateway principal.
+This sequence follows a newly admitted transfer. Calls from Orchestrator to Ledger
+and Fraud are synchronous HTTP calls; there is no background transfer worker.
 
-Effective authorization depends on workload selectors and the combined policies.
+```mermaid
+sequenceDiagram
+  participant B as Browser
+  participant I as Ingress
+  participant U as UI
+  participant O as Orchestrator
+  participant L as Ledger
+  participant F as Fraud Analytics
+  participant D as PostgreSQL
 
-### Service identities
+  B->>I: GET /
+  I->>U: Request frontend assets
+  U-->>I: HTML and JavaScript
+  I-->>B: Frontend assets
+  Note over B: Authenticate with shared Keycloak
+  B->>I: POST /api/v1/transfers with JWT and request ID
+  I->>O: Route API request through receiving Sidecar
+  Note over O: Mesh and Quarkus verify JWT; bind session identity
+  O->>L: Read source account
+  L-->>O: Account ID and owner
+  Note over O: Verify requested source ID and owner before writes
+  O->>L: Admit request and freeze
+  L->>D: Atomic admission and freeze
+  D-->>L: Persisted result
+  L-->>O: New admission and transaction ID
+  O->>F: Analyze transfer
+  alt Fraud approved
+    F-->>O: Approval
+    O->>L: Commit specific transaction
+    L->>D: Atomic balance and state finalization
+    D-->>L: Finalization result
+    L-->>O: Commit acknowledgment
+    O-->>I: Transfer response
+    I-->>B: Transfer response
+  else Fraud failure or timeout
+    Note over O: Fraud call failed or timed out
+    O->>L: Unfreeze specific transaction
+    L->>D: Atomic compensation attempt
+    Note over O,L: Attempt only; acknowledgment does not verify restoration
+    O-->>I: Conservative compensation result
+    I-->>B: Compensation result
+  end
+```
 
-The active Orchestrator ServiceEntry describes service, workload and East-West
-Gateway identities. Keep its SPIFFE identities aligned with service accounts and
-authorization policies. The other internal ServiceEntry sources are fully
-commented and render no resources.
+The [transfer workflow](../src/intermesh-orchestrator/src/main/java/it/intermesh/bank/orchestrator/TransferOrchestrator.java)
+retains the transaction ID from admission for commit and compensation. Ledger
+finalizes only that transaction using exact monetary values. Commit failures can
+also trigger compensation; an ambiguous commit may already have succeeded, so
+compensation is not proof that funds were restored. An acknowledged unfreeze is
+reported as acknowledged, not independently verified restoration. An explicit
+failure leaves restoration unconfirmed; a timeout or lost response leaves the
+outcome unknown.
 
-| Namespace | ServiceEntry manifests |
-| --- | --- |
-| `intermesh-frontend` | [UI (commented)](../manifests/ossm/serviceentry/intermesh-ui-se.yaml) |
-| `intermesh-backend` | [Orchestrator](../manifests/ossm/serviceentry/intermesh-orchestrator-se.yaml), [Ledger (commented)](../manifests/ossm/serviceentry/intermesh-ledger-se.yaml), [Fraud Analytics (commented)](../manifests/ossm/serviceentry/fraud-analytics-se.yaml) |
-| `intermesh-backend` | [Channel Hub (inactive, commented)](../manifests/ossm/serviceentry/intermesh-channel-hub-se.yaml) |
+A replay or persisted admission result can return before Fraud/commit, without
+repeating the financial workflow. The browser retains request intent in
+sessionStorage and can query `/api/v1/transfer-requests/{transfer_request_id}`.
+Recovery is a read of persisted state, not an automatic POST retry. Duplicate
+confirmation is explicit. The workflow records the destination but does not
+implement recipient settlement.
 
-External ServiceEntries in `intermesh-backend` declare
-[PostgreSQL](../manifests/ossm/serviceentry/serviceentry-db.yaml) on TCP/5432 and
-[Keycloak](../manifests/ossm/serviceentry/serviceentry-keycloak.yaml) on HTTPS/443
-as `MESH_EXTERNAL` services.
+## Authentication and application sessions
 
-## Configuration
+The shared Keycloak realm is `intermesh-bank`, with public client
+`intermesh-frontend`. The browser uses authorization code flow with PKCE S256.
+At the receiving Orchestrator Sidecar, RequestAuthentication validates JWTs and
+forwards the original token. A workload-scoped DENY requires a validated request
+principal on all incoming port-8080 traffic, including diagnostic paths.
 
-### Shared PostgreSQL
+Quarkus independently verifies the current bearer JWT. Its banking identity uses
+`(iss, sub)` and the verified `preferred_username` owner key. Banking operations
+bind local application sessions to that subject and enforce account ownership
+independently of affinity. Ledger and Fraud authorize the Orchestrator workload
+principal; browser JWTs are not automatically forwarded to Ledger. See the
+[security flow and manifests](../service-mesh/README.md#authentication-and-authorization).
 
-Each managed cluster needs a Secret named `intermesh-ledger-db` in
-`intermesh-backend`, with key `DATABASE_URL`. The two Secrets may contain the
-same complete connection string for the single shared database. Preserve the
-database name, schema/search-path options, TLS settings and connection semantics;
-there are no per-cluster databases, schemas or synchronization mechanisms.
+Each cluster selects exactly one network-specific Orchestrator DestinationRule:
 
-The hostname in `DATABASE_URL` must agree with the PostgreSQL ServiceEntry
-hostname. Use the
-[PostgreSQL Secret example](../manifests/examples/postgres-secret.example.yaml)
-and keep actual values in protected local configuration.
-
-PostgreSQL egress isolation is not configured. The ServiceEntry registers an
-external destination; it does not restrict database access to Ledger.
-
-### Keycloak SSO and realm provisioning
-
-The Hub hosts [KeycloakRealmImport](../manifests/keycloak/realmimport.yaml)
-and Secret `intermesh-keycloak-credentials` in namespace `keycloak`, alongside
-Keycloak CR `keycloak`. The import uses API `k8s.keycloak.org/v2alpha1`.
-The selected Operator/CRD must support `spec.placeholders`; its version is not
-pinned in the repository.
-
-The provisioning Secret supplies five keys: `HUB_CLIENT_SECRET`,
-`DEMO_USER_1_PASSWORD`, `DEMO_USER_2_PASSWORD`, `DEMO_USER_3_PASSWORD` and
-`DEMO_ADMIN_PASSWORD`. It is needed only on the Hub, not in the managed clusters.
-Use the [Keycloak Secret example](../manifests/examples/keycloak-credentials.secret.example.yaml)
-and [local provisioning instructions](../manifests/examples/README.md).
-RealmImport creates new realms; changing its Secret does not rotate credentials
-in an already imported realm.
-
-The realm is `intermesh-bank`, with frontend client `intermesh-frontend` and
-retained inactive client `intermesh-channel-hub`. The three banking usernames
-match [SQL fixtures](../sql/001.sql). Keep all four realm users, profiles, roles,
-groups, credential flags and their fixture relationships intact.
-
-Changing the shared SSO endpoint requires coordinated updates to:
-
-- UI `KEYCLOAK_URL`, consumed by the
-  [startup substitution script](../intermesh-ui/src/00-substitute-env.sh).
-- RequestAuthentication issuer and JWKS URL, AuthorizationPolicy principal prefix,
-  and the Keycloak ServiceEntry host.
-- Retained Channel Hub `KEYCLOAK_ISSUER` configuration, if maintained.
-
-Realm/client identifiers, issuer semantics and login flows remain unchanged.
-
-### Session affinity
-
-Each managed cluster uses exactly one Orchestrator DestinationRule:
-
-| Cluster | DestinationRule | Affinity cookie |
+| Network | Rule | Affinity cookie |
 | --- | --- | --- |
-| Cluster 1 / `network1` | [orchestrator-network1-dr.yaml](../manifests/ossm/destination-rules/network1/orchestrator-network1-dr.yaml): `intermesh-orchestrator-dr-network1` | `network1.session`, TTL `0s` |
-| Cluster 2 / `network2` | [orchestrator-network2-dr.yaml](../manifests/ossm/destination-rules/network2/orchestrator-network2-dr.yaml): `intermesh-orchestrator-dr-network2` | `network2.session`, TTL `0s` |
+| `network1` | [intermesh-orchestrator-dr-network1](../service-mesh/traffic-management/destination-rules/network1/orchestrator-network1-dr.yaml) | `network1.session`, TTL `0s` |
+| `network2` | [intermesh-orchestrator-dr-network2](../service-mesh/traffic-management/destination-rules/network2/orchestrator-network2-dr.yaml) | `network2.session`, TTL `0s` |
 
-Both target `intermesh-orchestrator.intermesh-backend.svc.cluster.local` in
-`intermesh-backend`. They do not select themselves by network, so deploying both
-to one cluster creates competing traffic policies.
+`JSESSIONID` identifies the application session stored locally by Orchestrator and
+is separate from network affinity. See [session affinity](../service-mesh/README.md#session-affinity)
+for cookie generation, failover and session-isolation behavior.
 
-`JSESSIONID` identifies the application session stored locally by Orchestrator and is separate from network affinity.
-[application.properties](../intermesh-orchestrator/src/main/resources/application.properties)
-and [VertxSessionConfig.java](../intermesh-orchestrator/src/main/java/it/intermesh/bank/util/VertxSessionConfig.java)
-configure the session and local session store. Preserve all three cookies and
-their forwarding across Gateway hops.
+## Shared dependencies and configuration
 
-### WasmPlugin
+### PostgreSQL
 
-[security-headers-wasmplugin.yaml](../manifests/ossm/wasm/security-headers-wasmplugin.yaml) selects
-`app: intermesh-orchestrator` in `intermesh-backend` and uses
-`failStrategy: FAIL_OPEN`. Its OCI artifact is
-`security-headers-wasmplugin:1.0`; the manifest specifies the full image locator.
-Deploy the plugin alongside Orchestrator in both managed clusters.
+All Ledger workloads use one external database. Each managed cluster requires
+Secret `intermesh-backend/intermesh-ledger-db`, key `DATABASE_URL`; both Secrets
+can contain the same connection string. Preserve database name, schema/search-path
+options, TLS settings and connection semantics. The hostname must agree with the
+PostgreSQL ServiceEntry. There are no per-cluster databases or synchronization
+mechanisms. PostgreSQL egress isolation is not configured.
 
-The [Rust implementation](../security-headers-wasmplugin/src/lib.rs) checks
-HTTP `:authority` for `fraud-analytics` and sets `x-intermesh-channel` and
-`x-intermesh-route-class`. Its `Web-Channel-Hub` value is a routing marker,
-not an active Channel Hub dependency. Keep these markers and authority semantics
-aligned with fraud routing.
+The [SQL sources](../applications/prerequisites/dependencies/postgresql) define
+accounts, transactions and transfer requests with `NUMERIC(15,2)` amounts. The
+repository does not pin a PostgreSQL server major version; the configured database
+must support the schema, transactional row/advisory locking and required privileges.
+Provision the schema through an appropriate database procedure. Do not reapply
+demo seed data to an existing database without verifying its current state.
+See [credential provisioning](examples/README.md#shared-postgresql-database).
 
-Use the existing [image packaging](../security-headers-wasmplugin/Containerfile)
-when publishing the artifact. Registry relocation requires updating the
-WasmPlugin's `spec.url`; a workload image override does not update that field.
+### Keycloak
 
-## Local Kustomize rendering
+The [RealmImport](../applications/prerequisites/dependencies/keycloak/realmimport.yaml)
+uses `k8s.keycloak.org/v2alpha1`, Keycloak CR `keycloak` and Secret
+`intermesh-keycloak-credentials` in the Hub's `keycloak` namespace. Five Secret-backed
+placeholders supply the retained client secret and demo-user credentials. The
+selected RHBK Operator/CRD must support `spec.placeholders`; no Operator version or
+installation is supplied here. RealmImport initially creates a realm and does not
+reconcile later client or credential changes into an existing realm.
 
-Render each target independently from the repository root:
+Both frontends use one canonical issuer and distinct environment origins.
+[Shared private configuration](examples/README.md#shared-keycloak-endpoint) keeps
+UI startup substitution, Quarkus issuer, Istio issuer/JWKS/principal and Keycloak
+ServiceEntry host aligned. Frontend allowlists use origin-scoped login paths,
+exact Web Origins and explicit logout origins. Effective access-token scopes must
+provide the verified `preferred_username` used by the account fixtures.
 
-```sh
-# Complete public ACM Hub governance aggregate
-oc kustomize overlays/hub-deploy --enable-alpha-plugins
-# Public networking, discovery and security governance subset
-oc kustomize manifests/ossm --enable-alpha-plugins
-# ACM Hub Keycloak provisioning
-oc kustomize manifests/keycloak
-# Managed Cluster 1 / network1
-oc kustomize overlays/managed-cluster-1
-# Managed Cluster 2 / network2
-oc kustomize overlays/managed-cluster-2
-```
+## Deployment prerequisites and invariants
 
-`kubectl kustomize` can be used in place of `oc kustomize`. These commands render
-local manifests without contacting a cluster or deploying resources.
-The managed-cluster overlays combine the shared base in
-[manifests/kustomization.yaml](../manifests/kustomization.yaml) with exactly one
-network-specific DestinationRule. The Hub governance and Keycloak entrypoints
-are separate from one another. Governance rendering requires the trusted
-PolicyGenerator plugin and `--enable-alpha-plugins`.
+Use the [platform guide](../platform/openshift/ossm/README.md), the appropriate
+[ACM runbook](acm-deployment-readiness.md) or
+[standalone installation sequence](../deploy/standalone/README.md#staged-installation),
+and [private examples](examples/README.md). Required environment inputs include
+published application/Wasm artifacts, external endpoints, credentials, shared
+mesh trust, remote discovery, gateway addresses and DNS/TLS configuration.
 
-The managed-cluster application renderings exclude Secret examples, the inactive
-Channel Hub Deployment, Service and ServiceEntry, and the standalone Fraud
-Analytics VirtualService. The dormant Channel Hub ServiceAccount and
-AuthorizationPolicy remain in canonical application rendering. ACM retains the
-ServiceAccount through its foundation Policy but excludes the dormant
-AuthorizationPolicy. None of these retained objects activates a workload.
+Preserve service names, namespaces, selectors, workload ServiceAccounts, trust
+domain, authority/SNI identifiers, route order and network-specific cookies.
+Cluster IDs `cluster1`/`cluster2` are Istio identities, not assumed ACM registration
+names or kubeconfig contexts. Sidecar is the reference data plane; no Ambient
+profile is supplied.
 
-For ACM deployment, use the validated `.local/hub-governance` overlay after
-configuring private values and satisfying the deployment prerequisites. Do not
-apply the public placeholder-bearing aggregate or separately deploy canonical
-application overlays alongside ACM. Provision database Secrets in both managed
-clusters and the Keycloak credential Secret on the Hub separately.
-
-## Deployment prerequisites
-
-ACM governs the OSSM Operator, IstioCNI, network-specific control planes, gateway
-workloads, application foundation, application workloads, WasmPlugin and Istio
-networking/security resources. The enforcing Policies reconcile desired
-resources; Policy compliance does not establish controller readiness, network
-reachability or application health. Use the staged checkpoints in the
-[ACM deployment runbook](acm-deployment-readiness.md).
-
-The deployment starts with an existing ACM Hub and two registered managed
-clusters. Public application images, Wasm OCI URL and external endpoint values
-use nonfunctional placeholders. Configure published artifacts and environment
-values through ignored private overlays as described in the
-[configuration examples](../manifests/examples/README.md).
-
-A deployment also needs environment-specific configuration for:
-
-- Cluster/context names, mesh and cluster IDs, network advertisements, and ACM
-  ManagedCluster names and labels.
-- Supported OpenShift/OSSM versions, trust certificates, remote discovery
-  Secrets and inter-cluster connectivity.
-- Ingress and East-West Gateway addresses, DNS, certificates and the approved
-  public HTTPS/proxy configuration.
-- RHBK server/Operator/CRD versions and installation resources, PostgreSQL
-  provisioning, protected Secret values and available container/Wasm images.
-
-The repository includes the L4 `AUTO_PASSTHROUGH` and dedicated Orchestrator L7
-`ISTIO_MUTUAL` Gateway/VirtualService configuration, including the ingress
-authority rewrite. Effective listeners, shared trust, discovery and network
-reachability require verification in the deployed mesh. The diagrams summarize
-these routing relationships rather than every configuration field.
-
-Keep service names, namespaces, ports, selectors, service accounts and
-`cluster.local`/SPIFFE identities consistent. Gateway names, wildcard hosts,
-route ordering and HTTP authority/SNI values can be routing identities rather
-than replaceable infrastructure addresses. Deploy resources by cluster and
-controller ownership rather than applying the entire manifests directory
-recursively.
-
-The Orchestrator manifest's environment-variable names differ from its REST
-client configuration keys. Effective overrides and port selection require
-integration testing; keep existing internal defaults when configuring endpoints.
-
-Validate the deployment across both managed clusters with Hub-hosted SSO and ACM
-governance. Cover browser login, direct API routing, session affinity across
-Gateway hops, shared Ledger data, fraud behavior and temporary workload
-unavailability. Coordinate workload outages and restoration with ACM desired
-state; application Deployments declare one replica. Offline manifest checks
-cannot validate these runtime behaviors.
+Public HTTPS-only access and effective custom session-cookie attributes require
+an approved deployment configuration. Application health endpoints/probes are not
+provided by the session handler's health-path bypass. Offline rendering establishes
+source composition. Follow the
+[operational verification matrix](acm-deployment-readiness.md#functional-verification-matrix)
+for deployment acceptance checks.

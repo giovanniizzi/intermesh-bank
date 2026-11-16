@@ -1,0 +1,35 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: istio-fraud-analytics-chaos-generator
+placementBindingDefaults:
+  name: binding-fraud-analytics-chaos
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: enforce
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  severity: high
+  namespaceSelector:
+    include:
+    - intermesh-backend
+  placement:
+    placementName: placement-all-clusters
+  dependencies:
+  - apiVersion: policy.open-cluster-management.io/v1
+    kind: Policy
+    name: intermesh-ossm-operator
+    namespace: open-cluster-management-policies
+    compliance: Compliant
+  - apiVersion: policy.open-cluster-management.io/v1
+    kind: Policy
+    name: intermesh-app-foundation
+    namespace: open-cluster-management-policies
+    compliance: Compliant
+policies:
+- name: istio-fraud-analytics-chaos
+  manifests:
+  - path: inputs/istio-fraud-analytics-chaos
+    name: config-policy-fraud-analytics-chaos

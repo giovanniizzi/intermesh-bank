@@ -1,0 +1,7 @@
+# Copy to .local/deploy/standalone/network2/kustomization.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- "../../../../deploy/standalone/network2"
+components:
+- "../../../configuration/standalone"

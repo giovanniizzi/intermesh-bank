@@ -1,0 +1,107 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- wasm
+generators:
+- policy-generator-ingress-network1.yaml
+- policy-generator-ingress-network2.yaml
+- policy-generator-affinity-network1.yaml
+- policy-generator-affinity-network2.yaml
+- policy-generator-security-static.yaml
+- policy-generator-discovery-internal.yaml
+- policy-generator-discovery-external.yaml
+- policy-generator-security-oidc.yaml
+- istio-gateway.yaml
+- acm-fraud-analytics-vs.yaml
+- orchestrator-session.yaml
+# Preserve annotation-free Policy metadata and existing PlacementBinding names.
+patches:
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: istio-gateway
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1categories"
+      value: CM Configuration Management
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1controls"
+      value: CM-2 Baseline Configuration
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1description"
+      value: ''
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1standards"
+      value: NIST SP 800-53
+    - op: remove
+      path: "/metadata/annotations"
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: orchestrator-session
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1categories"
+      value: CM Configuration Management
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1controls"
+      value: CM-2 Baseline Configuration
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1description"
+      value: ''
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1standards"
+      value: NIST SP 800-53
+    - op: remove
+      path: "/metadata/annotations"
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: istio-fraud-analytics-chaos
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1categories"
+      value: CM Configuration Management
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1controls"
+      value: CM-2 Baseline Configuration
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1description"
+      value: ''
+    - op: test
+      path: "/metadata/annotations/policy.open-cluster-management.io~1standards"
+      value: NIST SP 800-53
+    - op: remove
+      path: "/metadata/annotations"
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: PlacementBinding
+    name: binding-istio-gateway
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/metadata/name"
+      value: binding-istio-gateway
+    - op: replace
+      path: "/metadata/name"
+      value: binding-istio-cross-gateway
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: PlacementBinding
+    name: binding-istio-fraud-analytics-chaos
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/metadata/name"
+      value: binding-istio-fraud-analytics-chaos
+    - op: replace
+      path: "/metadata/name"
+      value: binding-fraud-analytics-chaos

@@ -1,4 +1,4 @@
-/security-headers-wasmplugin/target
+/src/security-headers-wasmplugin/target
 
 # Local configuration and environment files
 /.local/

@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: quarkus-eastwest-vs
+  namespace: istio-east-west
+spec:
+  gateways:
+  - east-west-https-gateway
+  hosts:
+  - intermesh-orchestrator.session.intermesh.com
+  http:
+  - match:
+    - uri:
+        prefix: "/api"
+    route:
+    - destination:
+        host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
+        port:
+          number: 80

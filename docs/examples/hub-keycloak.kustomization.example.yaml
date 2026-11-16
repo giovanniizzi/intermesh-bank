@@ -1,0 +1,115 @@
+# Copy to .local/prerequisites/keycloak/kustomization.yaml.
+# Frontend origins come from the shared private values base.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- "../../../applications/prerequisites/dependencies/keycloak"
+- "../../configuration/values"
+patches:
+- target:
+    group: k8s.keycloak.org
+    version: v2alpha1
+    kind: KeycloakRealmImport
+    name: intermesh-bank-realm-import
+    namespace: keycloak
+  patch: |
+    - op: test
+      path: "/spec/realm/clients/0/clientId"
+      value: intermesh-frontend
+replacements:
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.frontendOriginNetwork1
+  targets:
+  - select:
+      group: k8s.keycloak.org
+      version: v2alpha1
+      kind: KeycloakRealmImport
+      name: intermesh-bank-realm-import
+      namespace: keycloak
+    fieldPaths:
+    - spec.realm.clients.0.redirectUris.0
+    options:
+      delimiter: "/*"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.frontendOriginNetwork1
+  targets:
+  - select:
+      group: k8s.keycloak.org
+      version: v2alpha1
+      kind: KeycloakRealmImport
+      name: intermesh-bank-realm-import
+      namespace: keycloak
+    fieldPaths:
+    - spec.realm.clients.0.webOrigins.0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.frontendOriginNetwork1
+  targets:
+  - select:
+      group: k8s.keycloak.org
+      version: v2alpha1
+      kind: KeycloakRealmImport
+      name: intermesh-bank-realm-import
+      namespace: keycloak
+    fieldPaths:
+    - spec.realm.clients.0.attributes.[post.logout.redirect.uris]
+    options:
+      delimiter: "##"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.frontendOriginNetwork2
+  targets:
+  - select:
+      group: k8s.keycloak.org
+      version: v2alpha1
+      kind: KeycloakRealmImport
+      name: intermesh-bank-realm-import
+      namespace: keycloak
+    fieldPaths:
+    - spec.realm.clients.0.redirectUris.1
+    options:
+      delimiter: "/*"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.frontendOriginNetwork2
+  targets:
+  - select:
+      group: k8s.keycloak.org
+      version: v2alpha1
+      kind: KeycloakRealmImport
+      name: intermesh-bank-realm-import
+      namespace: keycloak
+    fieldPaths:
+    - spec.realm.clients.0.webOrigins.1
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.frontendOriginNetwork2
+  targets:
+  - select:
+      group: k8s.keycloak.org
+      version: v2alpha1
+      kind: KeycloakRealmImport
+      name: intermesh-bank-realm-import
+      namespace: keycloak
+    fieldPaths:
+    - spec.realm.clients.0.attributes.[post.logout.redirect.uris]
+    options:
+      delimiter: "##"
+      index: 1

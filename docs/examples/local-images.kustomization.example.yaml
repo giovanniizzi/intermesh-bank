@@ -1,0 +1,210 @@
+# Copy to .local/configuration/standalone/kustomization.yaml.
+# Shared Component: values come from ../values; do not copy per network.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- "../values"
+patches:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: intermesh-orchestrator
+    namespace: intermesh-backend
+  patch: |
+    - op: test
+      path: "/spec/template/spec/containers/0/name"
+      value: orchestrator
+    - op: test
+      path: "/spec/template/spec/containers/0/env/0/name"
+      value: NETWORK
+    - op: test
+      path: "/spec/template/spec/containers/0/env/1/name"
+      value: MP_JWT_VERIFY_ISSUER
+    - op: move
+      from: "/spec/template/spec/containers/0/env/1"
+      path: "/spec/template/spec/containers/0/env/0"
+replacements:
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.uiImage
+  targets:
+  - select:
+      version: v1
+      kind: Deployment
+      name: intermesh-ui
+      namespace: intermesh-frontend
+      group: apps
+    fieldPaths:
+    - spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.orchestratorImage
+  targets:
+  - select:
+      version: v1
+      kind: Deployment
+      name: intermesh-orchestrator
+      namespace: intermesh-backend
+      group: apps
+    fieldPaths:
+    - spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.ledgerImage
+  targets:
+  - select:
+      version: v1
+      kind: Deployment
+      name: intermesh-ledger
+      namespace: intermesh-backend
+      group: apps
+    fieldPaths:
+    - spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.fraudAnalyticsImage
+  targets:
+  - select:
+      version: v1
+      kind: Deployment
+      name: fraud-analytics
+      namespace: intermesh-backend
+      group: apps
+    fieldPaths:
+    - spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      version: v1
+      kind: Deployment
+      name: intermesh-ui
+      namespace: intermesh-frontend
+      group: apps
+    fieldPaths:
+    - spec.template.spec.containers.0.env.0.value
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      version: v1
+      kind: Deployment
+      name: intermesh-orchestrator
+      namespace: intermesh-backend
+      group: apps
+    fieldPaths:
+    - spec.template.spec.containers.0.env.0.value
+    options:
+      delimiter: "/realms/"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.wasmUrl
+  targets:
+  - select:
+      version: v1alpha1
+      kind: WasmPlugin
+      name: security-headers-wasmplugin
+      namespace: intermesh-backend
+      group: extensions.istio.io
+    fieldPaths:
+    - spec.url
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.postgresHost
+  targets:
+  - select:
+      version: v1alpha3
+      kind: ServiceEntry
+      name: intermesh-external-db
+      namespace: intermesh-backend
+      group: networking.istio.io
+    fieldPaths:
+    - spec.hosts.0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+    options:
+      delimiter: "/"
+      index: 2
+  targets:
+  - select:
+      version: v1alpha3
+      kind: ServiceEntry
+      name: keycloak-service-entry
+      namespace: intermesh-backend
+      group: networking.istio.io
+    fieldPaths:
+    - spec.hosts.0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      version: v1beta1
+      kind: RequestAuthentication
+      name: jwt-keycloak-auth
+      namespace: intermesh-backend
+      group: security.istio.io
+    fieldPaths:
+    - spec.jwtRules.0.issuer
+    options:
+      delimiter: "/realms/"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      version: v1beta1
+      kind: RequestAuthentication
+      name: jwt-keycloak-auth
+      namespace: intermesh-backend
+      group: security.istio.io
+    fieldPaths:
+    - spec.jwtRules.0.jwksUri
+    options:
+      delimiter: "/realms/"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      version: v1beta1
+      kind: AuthorizationPolicy
+      name: require-jwt-policy
+      namespace: intermesh-backend
+      group: security.istio.io
+    fieldPaths:
+    - spec.rules.0.from.0.source.requestPrincipals.0
+    options:
+      delimiter: "/realms/"
+      index: 0

@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: east-west-gateway
+  namespace: istio-east-west
+spec:
+  selector:
+    istio: eastwestgateway
+  servers:
+  - port:
+      number: 15443
+      name: tls
+      protocol: TLS
+    tls:
+      mode: AUTO_PASSTHROUGH
+    hosts:
+    - intermesh-ledger.intermesh-backend.svc.cluster.local
+    - fraud-analytics.intermesh-backend.svc.cluster.local
+    - intermesh-ui.intermesh-frontend.svc.cluster.local

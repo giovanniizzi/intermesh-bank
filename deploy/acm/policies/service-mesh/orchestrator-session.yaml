@@ -1,0 +1,40 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: orchestrator-session-generator
+placementBindingDefaults:
+  name: binding-orchestrator-session
+policyDefaults:
+  namespace: open-cluster-management-policies
+  remediationAction: enforce
+  complianceType: musthave
+  pruneObjectBehavior: None
+  recreateOption: None
+  ignorePending: false
+  severity: high
+  namespaceSelector:
+    exclude:
+    - kube-*
+    - openshift-*
+    - default
+    include:
+    - istio-east-west
+    - istio-ingress
+  placement:
+    placementName: placement-all-clusters
+  dependencies:
+  - apiVersion: policy.open-cluster-management.io/v1
+    kind: Policy
+    name: intermesh-ossm-operator
+    namespace: open-cluster-management-policies
+    compliance: Compliant
+  - apiVersion: policy.open-cluster-management.io/v1
+    kind: Policy
+    name: intermesh-infra-ns-ingress
+    namespace: open-cluster-management-policies
+    compliance: Compliant
+policies:
+- name: orchestrator-session
+  manifests:
+  - path: inputs/orchestrator-session
+    name: config-policy-orchestrator-session

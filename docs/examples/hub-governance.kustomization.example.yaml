@@ -1,0 +1,756 @@
+# Copy to .local/deploy/acm/kustomization.yaml.
+# Keep every public identity/placeholder test and both environment-order moves.
+# Configure private values once in .local/configuration/values/values.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- "../../../deploy/acm"
+- "../../configuration/values"
+patches:
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: intermesh-discovery-external
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/apiVersion"
+      value: policy.open-cluster-management.io/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/kind"
+      value: ConfigurationPolicy
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/metadata/name"
+      value: intermesh-discovery-external
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/apiVersion"
+      value: networking.istio.io/v1alpha3
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/kind"
+      value: ServiceEntry
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/name"
+      value: intermesh-external-db
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/hosts/0"
+      value: postgres.example.invalid
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/apiVersion"
+      value: networking.istio.io/v1alpha3
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/kind"
+      value: ServiceEntry
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/name"
+      value: keycloak-service-entry
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/spec/hosts/0"
+      value: keycloak.example.invalid
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: intermesh-security-oidc
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/apiVersion"
+      value: policy.open-cluster-management.io/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/kind"
+      value: ConfigurationPolicy
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/metadata/name"
+      value: intermesh-security-oidc
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/apiVersion"
+      value: security.istio.io/v1beta1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/kind"
+      value: RequestAuthentication
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/name"
+      value: jwt-keycloak-auth
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/jwtRules/0/issuer"
+      value: https://keycloak.example.invalid/realms/intermesh-bank
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/jwtRules/0/jwksUri"
+      value: https://keycloak.example.invalid/realms/intermesh-bank/protocol/openid-connect/certs
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/apiVersion"
+      value: security.istio.io/v1beta1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/kind"
+      value: AuthorizationPolicy
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/name"
+      value: require-jwt-policy
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/spec/rules/0/from/0/source/requestPrincipals/0"
+      value: https://keycloak.example.invalid/realms/intermesh-bank/*
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: intermesh-app-network1
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/apiVersion"
+      value: policy.open-cluster-management.io/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/kind"
+      value: ConfigurationPolicy
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/metadata/name"
+      value: intermesh-app-network1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/name"
+      value: intermesh-ui
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/namespace"
+      value: intermesh-frontend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/name"
+      value: web-frontend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/intermesh-ui:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/env/0/name"
+      value: KEYCLOAK_URL
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/env/0/value"
+      value: https://keycloak.example.invalid
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/name"
+      value: intermesh-ui
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/namespace"
+      value: intermesh-frontend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/metadata/name"
+      value: intermesh-orchestrator
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/name"
+      value: orchestrator
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/intermesh-orchestrator:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/name"
+      value: NETWORK
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/value"
+      value: network1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/1/name"
+      value: MP_JWT_VERIFY_ISSUER
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/1/value"
+      value: https://keycloak.example.invalid/realms/intermesh-bank
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/2/name"
+      value: QUARKUS_REST_CLIENT_LEDGER_API_URL
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/2/value"
+      value: http://intermesh-ledger.intermesh-backend.svc.cluster.local:8080
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/3/name"
+      value: FRAUD_ANALYTICS_URL
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/3/value"
+      value: http://fraud-analytics.intermesh-backend.svc.cluster.local:8080
+    - op: move
+      from: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/1"
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0"
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/name"
+      value: MP_JWT_VERIFY_ISSUER
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/value"
+      value: https://keycloak.example.invalid/realms/intermesh-bank
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/metadata/name"
+      value: intermesh-orchestrator
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/metadata/name"
+      value: intermesh-ledger
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/spec/template/spec/containers/0/name"
+      value: ledger
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/intermesh-ledger:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/metadata/name"
+      value: intermesh-ledger
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/metadata/name"
+      value: fraud-analytics
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/spec/template/spec/containers/0/name"
+      value: fraud-analytics
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/fraud-analytics:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/metadata/name"
+      value: fraud-analytics
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: intermesh-app-network2
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/apiVersion"
+      value: policy.open-cluster-management.io/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/kind"
+      value: ConfigurationPolicy
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/metadata/name"
+      value: intermesh-app-network2
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/name"
+      value: intermesh-ui
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/namespace"
+      value: intermesh-frontend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/name"
+      value: web-frontend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/intermesh-ui:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/env/0/name"
+      value: KEYCLOAK_URL
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/template/spec/containers/0/env/0/value"
+      value: https://keycloak.example.invalid
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/name"
+      value: intermesh-ui
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/1/objectDefinition/metadata/namespace"
+      value: intermesh-frontend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/metadata/name"
+      value: intermesh-orchestrator
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/name"
+      value: orchestrator
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/intermesh-orchestrator:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/name"
+      value: NETWORK
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/value"
+      value: network2
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/1/name"
+      value: MP_JWT_VERIFY_ISSUER
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/1/value"
+      value: https://keycloak.example.invalid/realms/intermesh-bank
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/2/name"
+      value: QUARKUS_REST_CLIENT_LEDGER_API_URL
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/2/value"
+      value: http://intermesh-ledger.intermesh-backend.svc.cluster.local:8080
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/3/name"
+      value: FRAUD_ANALYTICS_URL
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/3/value"
+      value: http://fraud-analytics.intermesh-backend.svc.cluster.local:8080
+    - op: move
+      from: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/1"
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0"
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/name"
+      value: MP_JWT_VERIFY_ISSUER
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/2/objectDefinition/spec/template/spec/containers/0/env/0/value"
+      value: https://keycloak.example.invalid/realms/intermesh-bank
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/metadata/name"
+      value: intermesh-orchestrator
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/3/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/metadata/name"
+      value: intermesh-ledger
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/spec/template/spec/containers/0/name"
+      value: ledger
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/4/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/intermesh-ledger:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/metadata/name"
+      value: intermesh-ledger
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/5/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/apiVersion"
+      value: apps/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/kind"
+      value: Deployment
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/metadata/name"
+      value: fraud-analytics
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/spec/template/spec/containers/0/name"
+      value: fraud-analytics
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/6/objectDefinition/spec/template/spec/containers/0/image"
+      value: example.invalid/fraud-analytics:1.0
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/apiVersion"
+      value: v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/kind"
+      value: Service
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/metadata/name"
+      value: fraud-analytics
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/7/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+- target:
+    group: policy.open-cluster-management.io
+    version: v1
+    kind: Policy
+    name: intermesh-wasm
+    namespace: open-cluster-management-policies
+  patch: |
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/apiVersion"
+      value: policy.open-cluster-management.io/v1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/kind"
+      value: ConfigurationPolicy
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/metadata/name"
+      value: intermesh-wasm
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/apiVersion"
+      value: extensions.istio.io/v1alpha1
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/kind"
+      value: WasmPlugin
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/name"
+      value: security-headers-wasmplugin
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/metadata/namespace"
+      value: intermesh-backend
+    - op: test
+      path: "/spec/policy-templates/0/objectDefinition/spec/object-templates/0/objectDefinition/spec/url"
+      value: oci://example.invalid/security-headers-wasmplugin:1.0
+replacements:
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.uiImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network1
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.uiImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network2
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.orchestratorImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network1
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.2.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.orchestratorImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network2
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.2.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.ledgerImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network1
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.4.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.ledgerImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network2
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.4.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.fraudAnalyticsImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network1
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.6.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.fraudAnalyticsImage
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network2
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.6.objectDefinition.spec.template.spec.containers.0.image
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network1
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.template.spec.containers.0.env.0.value
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network2
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.template.spec.containers.0.env.0.value
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network1
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.2.objectDefinition.spec.template.spec.containers.0.env.0.value
+    options:
+      delimiter: "/realms/"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-app-network2
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.2.objectDefinition.spec.template.spec.containers.0.env.0.value
+    options:
+      delimiter: "/realms/"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.wasmUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-wasm
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.url
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.postgresHost
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-discovery-external
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.hosts.0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+    options:
+      delimiter: "/"
+      index: 2
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-discovery-external
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.1.objectDefinition.spec.hosts.0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-security-oidc
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.jwtRules.0.issuer
+    options:
+      delimiter: "/realms/"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-security-oidc
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.0.objectDefinition.spec.jwtRules.0.jwksUri
+    options:
+      delimiter: "/realms/"
+      index: 0
+- source:
+    version: v1
+    kind: ConfigMap
+    name: intermesh-private-render-values
+    fieldPath: data.keycloakUrl
+  targets:
+  - select:
+      group: policy.open-cluster-management.io
+      version: v1
+      kind: Policy
+      name: intermesh-security-oidc
+      namespace: open-cluster-management-policies
+    fieldPaths:
+    - spec.policy-templates.0.objectDefinition.spec.object-templates.1.objectDefinition.spec.rules.0.from.0.source.requestPrincipals.0
+    options:
+      delimiter: "/realms/"
+      index: 0

@@ -1,0 +1,18 @@
+# Copy to .local/configuration/values/values.yaml and replace all nine values.
+# Rendering input only: never put credentials in this file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: intermesh-private-render-values
+  annotations:
+    config.kubernetes.io/local-config: 'true'
+data:
+  uiImage: local-test.invalid/intermesh-ui:1.0
+  orchestratorImage: local-test.invalid/intermesh-orchestrator:1.0
+  ledgerImage: local-test.invalid/intermesh-ledger:1.0
+  fraudAnalyticsImage: local-test.invalid/fraud-analytics:1.0
+  wasmUrl: oci://local-test.invalid/security-headers-wasmplugin:1.0
+  postgresHost: postgres-configure-me.example.invalid
+  keycloakUrl: https://keycloak-configure-me.example.invalid
+  frontendOriginNetwork1: https://bank-network1-configure-me.example.invalid
+  frontendOriginNetwork2: https://bank-network2-configure-me.example.invalid
