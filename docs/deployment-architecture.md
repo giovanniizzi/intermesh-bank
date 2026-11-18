@@ -68,7 +68,7 @@ The sources do not provision them or establish effective Envoy listeners.
 | Location | Components |
 | --- | --- |
 | Hub, `open-cluster-management-policies` | ACM Policies, Placements and PlacementBindings in ACM mode. |
-| Hub, `keycloak` | RHBK and its Operator, Keycloak CR, provisioning Secret and RealmImport. Only the RealmImport is supplied here. |
+| Hub, `rhbk` | RHBK and its Operator, Keycloak CR, provisioning Secret and RealmImport. Only the RealmImport is supplied here. |
 | Each cluster, `intermesh-frontend` | UI Deployment, Service and ServiceAccount. |
 | Each cluster, `intermesh-backend` | Orchestrator, Ledger and Fraud Deployments/Services; backend ServiceAccounts, Ledger database Secret and applicable Istio resources. |
 | Each cluster, OSSM namespaces | Control plane, CNI, Ingress and East-West workloads. |
@@ -231,14 +231,15 @@ See [credential provisioning](examples/README.md#shared-postgresql-database).
 ### Keycloak
 
 The [RealmImport](../applications/prerequisites/dependencies/keycloak/realmimport.yaml)
-uses `k8s.keycloak.org/v2alpha1`, Keycloak CR `keycloak` and Secret
-`intermesh-keycloak-credentials` in the Hub's `keycloak` namespace. Five Secret-backed
+uses `k8s.keycloak.org/v2beta1`, Keycloak CR `keycloak` and Secret
+`intermesh-keycloak-credentials` in the Hub's `rhbk` namespace. Five Secret-backed
 placeholders supply the retained client secret and demo-user credentials. The
-selected RHBK Operator/CRD must support `spec.placeholders`; no Operator version or
-installation is supplied here. RealmImport initially creates a realm and does not
+RHBK 26.6 Operator/CRD must serve this API and support `spec.placeholders`;
+Operator installation is separate. RealmImport initially creates a realm and does not
 reconcile later client or credential changes into an existing realm.
 
 Both frontends use one canonical issuer and distinct environment origins.
+The public frontend client requires PKCE S256 and disables direct access grants.
 [Shared private configuration](examples/README.md#shared-keycloak-endpoint) keeps
 UI startup substitution, Quarkus issuer, Istio issuer/JWKS/principal and Keycloak
 ServiceEntry host aligned. Frontend allowlists use origin-scoped login paths,

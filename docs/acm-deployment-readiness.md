@@ -100,14 +100,15 @@ and `JSESSIONID` when replacing environment inputs.
   never pass a connection string in command arguments or print Secret contents.
   ServiceEntry does not establish PostgreSQL egress isolation. Rotating an
   environment-backed Secret also requires a controlled workload restart.
-- **Keycloak:** the Hub needs a compatible RHBK Operator, namespace `keycloak`,
+- **Keycloak:** the Hub needs the RHBK 26.6 Operator, namespace `rhbk`,
   Keycloak CR `keycloak`, and Secret `intermesh-keycloak-credentials`. Its five
   keys are `HUB_CLIENT_SECRET`, `DEMO_USER_1_PASSWORD`, `DEMO_USER_2_PASSWORD`,
   `DEMO_USER_3_PASSWORD` and `DEMO_ADMIN_PASSWORD`. Follow the
   [credential instructions](examples/README.md#keycloak-realm-provisioning-credentials)
   and render `.local/prerequisites/keycloak` separately. It contains one RealmImport and
   is not part of the 55-object governance aggregate. Realm `intermesh-bank`,
-  public client `intermesh-frontend` and PKCE S256 remain unchanged. Verify
+  public client `intermesh-frontend` and browser PKCE S256 are preserved. The client
+  requires S256 and disables direct access grants. Verify
   `preferred_username` in effective access-token scopes/mappers; the import alone
   does not establish the deployed default-scope contract. Match fictional account
   owner keys without silently substituting `sub` or email.

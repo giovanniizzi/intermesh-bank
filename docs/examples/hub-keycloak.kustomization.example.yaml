@@ -8,10 +8,10 @@ resources:
 patches:
 - target:
     group: k8s.keycloak.org
-    version: v2alpha1
+    version: v2beta1
     kind: KeycloakRealmImport
     name: intermesh-bank-realm-import
-    namespace: keycloak
+    namespace: rhbk
   patch: |
     - op: test
       path: "/spec/realm/clients/0/clientId"
@@ -25,10 +25,10 @@ replacements:
   targets:
   - select:
       group: k8s.keycloak.org
-      version: v2alpha1
+      version: v2beta1
       kind: KeycloakRealmImport
       name: intermesh-bank-realm-import
-      namespace: keycloak
+      namespace: rhbk
     fieldPaths:
     - spec.realm.clients.0.redirectUris.0
     options:
@@ -42,10 +42,10 @@ replacements:
   targets:
   - select:
       group: k8s.keycloak.org
-      version: v2alpha1
+      version: v2beta1
       kind: KeycloakRealmImport
       name: intermesh-bank-realm-import
-      namespace: keycloak
+      namespace: rhbk
     fieldPaths:
     - spec.realm.clients.0.webOrigins.0
 - source:
@@ -56,10 +56,10 @@ replacements:
   targets:
   - select:
       group: k8s.keycloak.org
-      version: v2alpha1
+      version: v2beta1
       kind: KeycloakRealmImport
       name: intermesh-bank-realm-import
-      namespace: keycloak
+      namespace: rhbk
     fieldPaths:
     - spec.realm.clients.0.attributes.[post.logout.redirect.uris]
     options:
@@ -73,10 +73,10 @@ replacements:
   targets:
   - select:
       group: k8s.keycloak.org
-      version: v2alpha1
+      version: v2beta1
       kind: KeycloakRealmImport
       name: intermesh-bank-realm-import
-      namespace: keycloak
+      namespace: rhbk
     fieldPaths:
     - spec.realm.clients.0.redirectUris.1
     options:
@@ -90,10 +90,10 @@ replacements:
   targets:
   - select:
       group: k8s.keycloak.org
-      version: v2alpha1
+      version: v2beta1
       kind: KeycloakRealmImport
       name: intermesh-bank-realm-import
-      namespace: keycloak
+      namespace: rhbk
     fieldPaths:
     - spec.realm.clients.0.webOrigins.1
 - source:
@@ -104,10 +104,10 @@ replacements:
   targets:
   - select:
       group: k8s.keycloak.org
-      version: v2alpha1
+      version: v2beta1
       kind: KeycloakRealmImport
       name: intermesh-bank-realm-import
-      namespace: keycloak
+      namespace: rhbk
     fieldPaths:
     - spec.realm.clients.0.attributes.[post.logout.redirect.uris]
     options:

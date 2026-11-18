@@ -98,12 +98,14 @@ changing that format.
 The independent `.local/prerequisites/keycloak` overlay references
 `applications/prerequisites/dependencies/keycloak`. Its client-ID guard and
 replacements preserve all realm settings except the three frontend allowlists.
-The Keycloak Operator, Keycloak CR and credential Secret are separate prerequisites.
-This entrypoint does not install Keycloak.
+The RHBK 26.6 Operator, existing Keycloak CR `rhbk/keycloak` and credential Secret
+are separate prerequisites. This entrypoint does not install Keycloak or configure
+its database.
 
 Configure `frontendOriginNetwork1` and `frontendOriginNetwork2` as exact HTTPS
 origins, without paths or trailing slashes. Include a port only when nondefault.
 Both frontends use the same realm; no global load balancer is required.
+The public frontend client requires PKCE S256 and disables direct access grants.
 
 - Login `redirectUris` append `/*` to each origin, allowing the existing page
   path and query to survive login.
@@ -214,7 +216,7 @@ assets or introduce it as an active application dependency.
 
 `applications/prerequisites/dependencies/keycloak/realmimport.yaml` uses the Keycloak Operator's
 `spec.placeholders` mechanism to populate its five existing credential fields
-from Secret `intermesh-keycloak-credentials` in namespace `keycloak`:
+from Secret `intermesh-keycloak-credentials` in namespace `rhbk`:
 
 | Secret key / placeholder | Existing credential |
 | --- | --- |
@@ -222,17 +224,17 @@ from Secret `intermesh-keycloak-credentials` in namespace `keycloak`:
 | `DEMO_USER_1_PASSWORD` | First banking user (`spec.realm.users[0]`) |
 | `DEMO_USER_2_PASSWORD` | Second banking user (`spec.realm.users[1]`) |
 | `DEMO_USER_3_PASSWORD` | Third banking user (`spec.realm.users[2]`) |
-| `DEMO_ADMIN_PASSWORD` | Existing realm-admin user (`spec.realm.users[3]`) |
+| `DEMO_ADMIN_PASSWORD` | Demo user with the custom realm role `admin` (`spec.realm.users[3]`) |
 
 The user indexes identify the realm entries and their SQL fixture relationships.
 Keep usernames and fixture owner keys aligned. Credential placeholders do not
 change the realm's roles, groups, client settings or password `temporary` flags.
+The custom `admin` role does not grant Keycloak administration permissions.
 
-The [RHBK 26.4 Operator guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.4/html-single/operator_guide/index)
-documents Secret-backed placeholders for `k8s.keycloak.org/v2alpha1`. The repository
-does not pin an Operator version or include its CRD. Before deployment, confirm
-the selected Operator and matching CRD support `spec.placeholders`. This is an
-Operator feature, not automatic Kubernetes expansion of `${...}` strings.
+The [RHBK 26.6 Operator guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.6/html-single/operator_guide/index)
+documents Secret-backed placeholders for `k8s.keycloak.org/v2beta1`. Confirm the
+installed Operator and CRD serve this version and support `spec.placeholders`.
+This is an Operator feature, not automatic Kubernetes expansion of `${...}` strings.
 
 ### Prepare and create the provisioning Secret
 
@@ -265,11 +267,11 @@ chmod 600 .local/keycloak/HUB_CLIENT_SECRET \
 ```
 
 For initial provisioning, select the cluster hosting the existing Keycloak CR
-named `keycloak`. Ensure namespace `keycloak` exists, then replace the example
+`rhbk/keycloak`. Ensure namespace `rhbk` exists, then replace the example
 context name and create the Secret from the protected files:
 
 ```sh
-oc --context=keycloak-host --namespace=keycloak create secret generic intermesh-keycloak-credentials \
+oc --context=keycloak-host --namespace=rhbk create secret generic intermesh-keycloak-credentials \
   --from-file=HUB_CLIENT_SECRET=.local/keycloak/HUB_CLIENT_SECRET \
   --from-file=DEMO_USER_1_PASSWORD=.local/keycloak/DEMO_USER_1_PASSWORD \
   --from-file=DEMO_USER_2_PASSWORD=.local/keycloak/DEMO_USER_2_PASSWORD \
@@ -281,6 +283,8 @@ Create this Secret before applying the realm import. It belongs in the same
 namespace and cluster as Keycloak and the import, not in every cluster consuming
 SSO. No additional Keycloak instances or Ledger databases are required.
 
+The import targets only `intermesh-bank`; it does not configure the `master` or
+`openshift` realms. Confirm `intermesh-bank` is absent before first provisioning.
 RealmImport creates new realms; it does not overwrite an existing realm. Updating
 this Secret or reapplying the import does not rotate credentials already imported
 into Keycloak. Existing-realm credential changes require an administrative operation.
