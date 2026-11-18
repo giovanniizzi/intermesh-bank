@@ -69,7 +69,7 @@ inputs. Ignored files are private configuration, not encrypted credential storag
 | Application images | Configured through private values; the shared application base uses `example.invalid/<component>:1.0`. | Configure all four published images once in `.local/configuration/values/values.yaml`; verify source provenance and pull access. |
 | Wasm OCI URL | Configured through private values; public URL is `oci://example.invalid/security-headers-wasmplugin:1.0`. | Configure the tested OCI artifact once as `wasmUrl` in the shared private values. Normal Kustomize `images` does not replace this field. |
 | Keycloak endpoints | Configured through private values; public host is `keycloak.example.invalid`. | UI base HTTPS URL, issuer, derived JWKS URI, principal pattern and ServiceEntry host must describe the same shared realm. |
-| Frontend origins | Configured through the shared frontend-origin values; public origins are `bank-network1.example.invalid` and `bank-network2.example.invalid`. | Supply two independent HTTPS origins; coordinate DNS, certificates and login/logout allowlists. No global load balancer is required. |
+| Frontend origins | Shared frontend-origin values configure explicit logout destinations. Demo login redirects and Web Origins use wildcards. | Supply two independent HTTPS logout origins; coordinate DNS and certificates. Use explicit login redirects and Web Origins for production. No global load balancer is required. |
 | PostgreSQL host | Configured through private values; public host is `postgres.example.invalid`. | Use one shared endpoint in both networks; match the host in each separately supplied `DATABASE_URL`. |
 | Database/schema and RHBK service | External dependencies. | Provision separately; the Hub aggregate creates neither PostgreSQL nor the RHBK Operator/Keycloak instance. |
 | Credentials and trust material | Secrets that must be provisioned securely: database, realm provisioning, signing CA and remote discovery; registry credentials if required. | Use approved local provisioning and restricted storage, never Policy objectDefinitions or tracked examples. |
@@ -112,8 +112,9 @@ and `JSESSIONID` when replacing environment inputs.
   `preferred_username` in effective access-token scopes/mappers; the import alone
   does not establish the deployed default-scope contract. Match fictional account
   owner keys without silently substituting `sub` or email.
-- **Browser allowlists:** login redirects use each origin plus `/*`; Web Origins
-  are exact bare origins; logout destinations are bare origins joined with `##`.
+- **Browser redirects:** demo login redirects and Web Origins use wildcards;
+  logout destinations are exact bare origins joined with `##`. See the
+  [demo security note](examples/README.md#hub-keycloak-provisioning-overlay).
   Replace all placeholders before initial import. RealmImport does not reconcile
   changes into an existing realm; later client changes need an administrative
   operation. Retaining the confidential Channel Hub client does not activate it.

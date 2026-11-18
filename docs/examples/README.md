@@ -97,7 +97,7 @@ changing that format.
 
 The independent `.local/prerequisites/keycloak` overlay references
 `applications/prerequisites/dependencies/keycloak`. Its client-ID guard and
-replacements preserve all realm settings except the three frontend allowlists.
+replacements preserve all realm settings except the frontend logout destinations.
 The RHBK 26.6 Operator, existing Keycloak CR `rhbk/keycloak` and credential Secret
 are separate prerequisites. This entrypoint does not install Keycloak or configure
 its database.
@@ -106,12 +106,14 @@ Configure `frontendOriginNetwork1` and `frontendOriginNetwork2` as exact HTTPS
 origins, without paths or trailing slashes. Include a port only when nondefault.
 Both frontends use the same realm; no global load balancer is required.
 The public frontend client requires PKCE S256 and disables direct access grants.
+These origins configure only `attributes.post.logout.redirect.uris`, which joins
+both bare origins with `##`, without a path wildcard.
 
-- Login `redirectUris` append `/*` to each origin, allowing the existing page
-  path and query to survive login.
-- CORS `webOrigins` use the exact bare origins.
-- `attributes.post.logout.redirect.uris` joins both bare origins with `##`,
-  without a path wildcard.
+**Demo security:** `redirectUris` and `webOrigins` use `["*"]` so the demo can run
+on different frontend hosts without changing login or CORS configuration. This
+intentionally permits unrestricted redirect destinations and Web Origins.
+Production deployments must use explicit redirect URIs and Web Origins; PKCE S256
+does not replace those restrictions.
 
 ```sh
 oc kustomize .local/prerequisites/keycloak

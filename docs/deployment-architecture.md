@@ -242,8 +242,10 @@ Both frontends use one canonical issuer and distinct environment origins.
 The public frontend client requires PKCE S256 and disables direct access grants.
 [Shared private configuration](examples/README.md#shared-keycloak-endpoint) keeps
 UI startup substitution, Quarkus issuer, Istio issuer/JWKS/principal and Keycloak
-ServiceEntry host aligned. Frontend allowlists use origin-scoped login paths,
-exact Web Origins and explicit logout origins. Effective access-token scopes must
+ServiceEntry host aligned. Frontend login redirects and Web Origins use wildcards
+for demo portability; logout origins remain explicit. See the
+[demo security note](examples/README.md#hub-keycloak-provisioning-overlay).
+Effective access-token scopes must
 provide the verified `preferred_username` used by the account fixtures.
 
 ## Deployment prerequisites and invariants
