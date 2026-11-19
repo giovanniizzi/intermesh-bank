@@ -67,8 +67,8 @@ explicit compatibility work.
 
 The UI container starts Nginx after replacing `PLACEHOLDER_KEYCLOAK_URL` using
 `KEYCLOAK_URL`. Merely opening the source HTML does not perform this substitution.
-Interactive use also needs a configured Keycloak client, allowed frontend origin
-and reachable authenticated API. See the
+Interactive use also needs a configured Keycloak client and reachable
+authenticated API. See the
 [configuration examples](examples/README.md#shared-keycloak-endpoint).
 
 ## Fraud Analytics

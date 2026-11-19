@@ -80,9 +80,9 @@ this is service routing, not database replication. Under ACM, coordinate outages
 with desired replica values because enforcement can reverse manual scaling. Use
 [workload unavailability and restoration](acm-deployment-readiness.md#workload-unavailability-and-restoration).
 
-Channel Hub is inactive. Its source code, ServiceAccount and Keycloak client are
-retained, but it has no deployed workload, Service or AuthorizationPolicy and is
-not an authentication boundary in the active path.
+Channel Hub is inactive. Its source code and ServiceAccount are retained, but it
+has no deployed workload, Service, AuthorizationPolicy or imported Keycloak client
+and is not an authentication boundary in the active path.
 
 ### Resource sources
 
@@ -232,9 +232,10 @@ See [credential provisioning](examples/README.md#shared-postgresql-database).
 
 The [RealmImport](../applications/prerequisites/dependencies/keycloak/realmimport.yaml)
 uses `k8s.keycloak.org/v2beta1`, Keycloak CR `keycloak` and Secret
-`intermesh-keycloak-credentials` in the Hub's `rhbk` namespace. Five Secret-backed
-placeholders supply the retained client secret and demo-user credentials. The
-RHBK 26.6 Operator/CRD must serve this API and support `spec.placeholders`;
+`intermesh-keycloak-credentials` in the Hub's `rhbk` namespace. Four Secret-backed
+placeholders supply the demo-user passwords. The import defines only the
+`intermesh-frontend` OIDC client. The RHBK 26.6 Operator/CRD must serve this API
+and support `spec.placeholders`;
 Operator installation is separate. RealmImport initially creates a realm and does not
 reconcile later client or credential changes into an existing realm.
 
@@ -243,7 +244,8 @@ The public frontend client requires PKCE S256 and disables direct access grants.
 [Shared private configuration](examples/README.md#shared-keycloak-endpoint) keeps
 UI startup substitution, Quarkus issuer, Istio issuer/JWKS/principal and Keycloak
 ServiceEntry host aligned. Frontend login redirects and Web Origins use wildcards
-for demo portability; logout origins remain explicit. See the
+for demo portability. Logout uses `post.logout.redirect.uris: "+"` to inherit the
+login redirect allowlist, so no frontend origin configuration is required. See the
 [demo security note](examples/README.md#hub-keycloak-provisioning-overlay).
 Effective access-token scopes must
 provide the verified `preferred_username` used by the account fixtures.

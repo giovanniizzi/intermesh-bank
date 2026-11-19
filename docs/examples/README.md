@@ -20,7 +20,8 @@ Current-source cleanup and Git history remediation remain separate tasks.
 ## Private deployment configuration
 
 Keep environment configuration under Git-ignored `.local/`. One values file
-supplies both deployment modes and the independent Keycloak provisioning overlay.
+supplies both deployment modes. The independent Keycloak provisioning overlay
+inherits its realm settings from the public base.
 Choose ACM or standalone ownership for each managed cluster; do not apply both
 to the same resources.
 
@@ -37,10 +38,10 @@ Restrict private directories to your user and private files to mode `0600`.
 | [standalone-network2.kustomization.example.yaml](standalone-network2.kustomization.example.yaml) | `.local/deploy/standalone/network2/kustomization.yaml` |
 | [hub-keycloak.kustomization.example.yaml](hub-keycloak.kustomization.example.yaml) | `.local/prerequisites/keycloak/kustomization.yaml` |
 
-Replace all nine values in `values.yaml`: four complete container image
-references, the Wasm OCI URL, the shared PostgreSQL hostname, the canonical
-Keycloak base URL and the two frontend origins. Examples use deliberately
-nonfunctional placeholders. Use published artifacts and valid environment
+Replace all seven values in `values.yaml`: four complete container image
+references, the Wasm OCI URL, the shared PostgreSQL hostname and the canonical
+Keycloak base URL. Examples use deliberately nonfunctional placeholders. Use
+published artifacts and valid environment
 endpoints before deployment. Keep `oci://` on the Wasm URL.
 
 The ConfigMap is a rendering carrier, marked
@@ -96,24 +97,26 @@ changing that format.
 ## Hub Keycloak provisioning overlay
 
 The independent `.local/prerequisites/keycloak` overlay references
-`applications/prerequisites/dependencies/keycloak`. Its client-ID guard and
-replacements preserve all realm settings except the frontend logout destinations.
+`applications/prerequisites/dependencies/keycloak` and retains its client-ID guard.
+It needs no shared-values reference or logout replacements.
 The RHBK 26.6 Operator, existing Keycloak CR `rhbk/keycloak` and credential Secret
 are separate prerequisites. This entrypoint does not install Keycloak or configure
 its database.
 
-Configure `frontendOriginNetwork1` and `frontendOriginNetwork2` as exact HTTPS
-origins, without paths or trailing slashes. Include a port only when nondefault.
-Both frontends use the same realm; no global load balancer is required.
-The public frontend client requires PKCE S256 and disables direct access grants.
-These origins configure only `attributes.post.logout.redirect.uris`, which joins
-both bare origins with `##`, without a path wildcard.
+Both frontends use the same realm; no global load balancer is required. The import
+defines only the public `intermesh-frontend` OIDC client, which requires PKCE S256
+and disables direct access grants. The legacy Channel Hub client is excluded.
+
+`attributes.post.logout.redirect.uris` is `"+"`, which inherits the client's login
+redirect allowlist. The frontend requests logout back to `window.location.origin`;
+no frontend origin configuration is required before provisioning.
 
 **Demo security:** `redirectUris` and `webOrigins` use `["*"]` so the demo can run
 on different frontend hosts without changing login or CORS configuration. This
-intentionally permits unrestricted redirect destinations and Web Origins.
-Production deployments must use explicit redirect URIs and Web Origins; PKCE S256
-does not replace those restrictions.
+intentionally permits unrestricted HTTP(S) login and logout redirect destinations
+and Web Origins. Production deployments must use explicit redirect URIs, Web
+Origins and appropriately restricted logout destinations; PKCE S256 does not
+replace those restrictions.
 
 ```sh
 oc kustomize .local/prerequisites/keycloak
@@ -212,17 +215,15 @@ use appropriate cluster access controls and encryption at rest.
 
 The browser loads UI assets through ingress at `/` and sends `/api` requests
 through ingress directly to Orchestrator, which calls Ledger and Fraud Analytics.
-Keycloak provides browser SSO. Channel Hub is inactive; its retained confidential
-client secret is needed for realm provisioning only. Do not inject it into frontend
-assets or introduce it as an active application dependency.
+Keycloak provides browser SSO through the public frontend client, which needs no
+client secret. Channel Hub is inactive and has no client in the RealmImport.
 
 `applications/prerequisites/dependencies/keycloak/realmimport.yaml` uses the Keycloak Operator's
-`spec.placeholders` mechanism to populate its five existing credential fields
+`spec.placeholders` mechanism to populate its four demo-user password fields
 from Secret `intermesh-keycloak-credentials` in namespace `rhbk`:
 
 | Secret key / placeholder | Existing credential |
 | --- | --- |
-| `HUB_CLIENT_SECRET` | Client `intermesh-channel-hub` secret |
 | `DEMO_USER_1_PASSWORD` | First banking user (`spec.realm.users[0]`) |
 | `DEMO_USER_2_PASSWORD` | Second banking user (`spec.realm.users[1]`) |
 | `DEMO_USER_3_PASSWORD` | Third banking user (`spec.realm.users[2]`) |
@@ -242,7 +243,7 @@ This is an Operator feature, not automatic Kubernetes expansion of `${...}` stri
 
 [keycloak-credentials.secret.example.yaml](keycloak-credentials.secret.example.yaml)
 documents the required Secret structure. Never apply it with its public
-replacement markers unchanged. Use five independently generated credentials;
+replacement markers unchanged. Use four independently generated passwords;
 do not reuse any previously published values or share one password across users.
 
 From the repository root, prepare protected local storage before saving values:
@@ -261,8 +262,7 @@ Do not print the files or put their contents in command arguments or shell histo
 Restrict their permissions:
 
 ```sh
-chmod 600 .local/keycloak/HUB_CLIENT_SECRET \
-  .local/keycloak/DEMO_USER_1_PASSWORD \
+chmod 600 .local/keycloak/DEMO_USER_1_PASSWORD \
   .local/keycloak/DEMO_USER_2_PASSWORD \
   .local/keycloak/DEMO_USER_3_PASSWORD \
   .local/keycloak/DEMO_ADMIN_PASSWORD
@@ -274,7 +274,6 @@ context name and create the Secret from the protected files:
 
 ```sh
 oc --context=keycloak-host --namespace=rhbk create secret generic intermesh-keycloak-credentials \
-  --from-file=HUB_CLIENT_SECRET=.local/keycloak/HUB_CLIENT_SECRET \
   --from-file=DEMO_USER_1_PASSWORD=.local/keycloak/DEMO_USER_1_PASSWORD \
   --from-file=DEMO_USER_2_PASSWORD=.local/keycloak/DEMO_USER_2_PASSWORD \
   --from-file=DEMO_USER_3_PASSWORD=.local/keycloak/DEMO_USER_3_PASSWORD \

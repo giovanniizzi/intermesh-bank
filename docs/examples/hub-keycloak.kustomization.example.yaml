@@ -1,10 +1,9 @@
 # Copy to .local/prerequisites/keycloak/kustomization.yaml.
-# Logout origins come from the shared private values base.
+# Realm settings are inherited from the public base.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - "../../../applications/prerequisites/dependencies/keycloak"
-- "../../configuration/values"
 patches:
 - target:
     group: k8s.keycloak.org
@@ -16,38 +15,3 @@ patches:
     - op: test
       path: "/spec/realm/clients/0/clientId"
       value: intermesh-frontend
-replacements:
-- source:
-    version: v1
-    kind: ConfigMap
-    name: intermesh-private-render-values
-    fieldPath: data.frontendOriginNetwork1
-  targets:
-  - select:
-      group: k8s.keycloak.org
-      version: v2beta1
-      kind: KeycloakRealmImport
-      name: intermesh-bank-realm-import
-      namespace: rhbk
-    fieldPaths:
-    - spec.realm.clients.0.attributes.[post.logout.redirect.uris]
-    options:
-      delimiter: "##"
-      index: 0
-- source:
-    version: v1
-    kind: ConfigMap
-    name: intermesh-private-render-values
-    fieldPath: data.frontendOriginNetwork2
-  targets:
-  - select:
-      group: k8s.keycloak.org
-      version: v2beta1
-      kind: KeycloakRealmImport
-      name: intermesh-bank-realm-import
-      namespace: rhbk
-    fieldPaths:
-    - spec.realm.clients.0.attributes.[post.logout.redirect.uris]
-    options:
-      delimiter: "##"
-      index: 1

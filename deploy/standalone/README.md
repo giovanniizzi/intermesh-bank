@@ -53,7 +53,7 @@ DNS names and coordinated OIDC settings before deployment. A successful renderin
 does not make these public values deployable.
 
 Copy the [private configuration examples](../../docs/examples/README.md#private-deployment-configuration)
-to `.local/` and configure the nine values in
+to `.local/` and configure the seven values in
 `.local/configuration/values/values.yaml`. The two private profiles reuse one
 Component for images, WasmPlugin, PostgreSQL discovery and coordinated OIDC
 settings. The rendering-only ConfigMap carrier is omitted from final output.
@@ -124,8 +124,10 @@ controllers and workloads before continuing.
    frontends. The existing [RealmImport entrypoint](../../applications/prerequisites/dependencies/keycloak/kustomization.yaml)
    belongs in its hosting environment, with the Keycloak Operator, Keycloak CR and
    provisioning Secret already available. RealmImport initially provisions a realm;
-   it does not reconcile an existing realm. Configure both frontend origin
-   allowlists and keep issuer, JWKS, TLS trust and client settings consistent.
+   it does not reconcile an existing realm. Demo redirects and Web Origins use
+   wildcards, with logout inheriting the login redirect allowlist through `+`; no
+   frontend origin configuration is required. Keep issuer, JWKS, TLS trust and
+   client settings consistent. Use explicit allowlists for production.
 9. **Install Istio configuration before admitting application traffic.** Use the
    existing [Gateways](../../service-mesh/networking/gateways/kustomization.yaml),
    [VirtualServices](../../service-mesh/traffic-management/virtual-services/kustomization.yaml),

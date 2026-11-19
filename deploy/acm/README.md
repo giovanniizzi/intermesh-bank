@@ -56,7 +56,7 @@ oc kustomize .local/deploy/acm --enable-alpha-plugins
 ```
 
 Public and private outputs have the same 55 identities and enforcement modes.
-Public images and endpoints are nonfunctional placeholders. Configure the nine
+Public images and endpoints are nonfunctional placeholders. Configure the seven
 shared values in `.local/configuration/values/values.yaml` before using private
 output; provision credentials separately. See the
 [configuration examples](../../docs/examples/README.md#private-deployment-configuration).

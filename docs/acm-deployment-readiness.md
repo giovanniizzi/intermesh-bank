@@ -44,7 +44,7 @@ checks are not substitutes for live admission or readiness checks.
 | Requirement | Required checkpoint |
 | --- | --- |
 | Hub and selection | Registered clusters, governance add-ons, ClusterSet access and correct PlacementDecisions. |
-| Environment configuration | Real DNS endpoints, both frontend origins, published images/Wasm artifact and pull access. Public examples are nonfunctional. |
+| Environment configuration | Real DNS endpoints, published images/Wasm artifact and pull access. Public examples are nonfunctional. |
 | Platform | Supported versions, installed Operator, established CRDs/webhooks, healthy CNI and control planes. |
 | Multicluster trust and discovery | Shared root, per-cluster signing material, reciprocal discovery and reachable APIs/gateways. |
 | HTTPS and cookies | Approved termination, certificates, redirects, proxy trust and effective custom session-cookie attributes before public exposure. |
@@ -69,7 +69,7 @@ inputs. Ignored files are private configuration, not encrypted credential storag
 | Application images | Configured through private values; the shared application base uses `example.invalid/<component>:1.0`. | Configure all four published images once in `.local/configuration/values/values.yaml`; verify source provenance and pull access. |
 | Wasm OCI URL | Configured through private values; public URL is `oci://example.invalid/security-headers-wasmplugin:1.0`. | Configure the tested OCI artifact once as `wasmUrl` in the shared private values. Normal Kustomize `images` does not replace this field. |
 | Keycloak endpoints | Configured through private values; public host is `keycloak.example.invalid`. | UI base HTTPS URL, issuer, derived JWKS URI, principal pattern and ServiceEntry host must describe the same shared realm. |
-| Frontend origins | Shared frontend-origin values configure explicit logout destinations. Demo login redirects and Web Origins use wildcards. | Supply two independent HTTPS logout origins; coordinate DNS and certificates. Use explicit login redirects and Web Origins for production. No global load balancer is required. |
+| Browser redirects | Demo login redirects and Web Origins use wildcards; logout uses `+` to inherit the login redirect allowlist. | No frontend origin configuration is required for the demo. Coordinate frontend DNS and certificates; use explicit login, logout and Web Origin allowlists for production. No global load balancer is required. |
 | PostgreSQL host | Configured through private values; public host is `postgres.example.invalid`. | Use one shared endpoint in both networks; match the host in each separately supplied `DATABASE_URL`. |
 | Database/schema and RHBK service | External dependencies. | Provision separately; the Hub aggregate creates neither PostgreSQL nor the RHBK Operator/Keycloak instance. |
 | Credentials and trust material | Secrets that must be provisioned securely: database, realm provisioning, signing CA and remote discovery; registry credentials if required. | Use approved local provisioning and restricted storage, never Policy objectDefinitions or tracked examples. |
@@ -101,8 +101,8 @@ and `JSESSIONID` when replacing environment inputs.
   ServiceEntry does not establish PostgreSQL egress isolation. Rotating an
   environment-backed Secret also requires a controlled workload restart.
 - **Keycloak:** the Hub needs the RHBK 26.6 Operator, namespace `rhbk`,
-  Keycloak CR `keycloak`, and Secret `intermesh-keycloak-credentials`. Its five
-  keys are `HUB_CLIENT_SECRET`, `DEMO_USER_1_PASSWORD`, `DEMO_USER_2_PASSWORD`,
+  Keycloak CR `keycloak`, and Secret `intermesh-keycloak-credentials`. Its four
+  keys are `DEMO_USER_1_PASSWORD`, `DEMO_USER_2_PASSWORD`,
   `DEMO_USER_3_PASSWORD` and `DEMO_ADMIN_PASSWORD`. Follow the
   [credential instructions](examples/README.md#keycloak-realm-provisioning-credentials)
   and render `.local/prerequisites/keycloak` separately. It contains one RealmImport and
@@ -113,11 +113,12 @@ and `JSESSIONID` when replacing environment inputs.
   does not establish the deployed default-scope contract. Match fictional account
   owner keys without silently substituting `sub` or email.
 - **Browser redirects:** demo login redirects and Web Origins use wildcards;
-  logout destinations are exact bare origins joined with `##`. See the
+  logout uses `+` to inherit the login redirect allowlist. No frontend origin
+  configuration is required. See the
   [demo security note](examples/README.md#hub-keycloak-provisioning-overlay).
-  Replace all placeholders before initial import. RealmImport does not reconcile
-  changes into an existing realm; later client changes need an administrative
-  operation. Retaining the confidential Channel Hub client does not activate it.
+  RealmImport does not reconcile changes into an existing realm; later client
+  changes need an administrative operation. The legacy Channel Hub client is
+  excluded from the import.
 - **Mesh trust:** prepare `istio-system/cacerts` before first control-plane
   installation, with the approved shared root and appropriate per-cluster signing
   material. Reciprocal discovery credentials, remote API reachability and
