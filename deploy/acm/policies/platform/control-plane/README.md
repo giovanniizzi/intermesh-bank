@@ -1,7 +1,7 @@
 # Multi-primary control-plane governance
 
 This entrypoint governs one Istio control plane on each of the two managed
-clusters. Both use the OSSM 3.4 Sidecar data plane, a shared mesh ID and trust
+clusters. Both use the OSSM 3.5 Sidecar data plane, a shared mesh ID and trust
 domain, and distinct cluster and network identities.
 
 The [shared source](../../../../../platform/openshift/ossm/control-plane/base/istio.yaml) retains `meshID: mesh1`,
@@ -27,12 +27,15 @@ The cluster-scoped resource uses `sailoperator.io/v1`, kind `Istio`, name
 the control-plane namespace. The `openshift` profile is supported by the Red Hat
 release-3.4 API and records the intended OpenShift configuration.
 
-`spec.version` is omitted so the installed Red Hat Operator's CRD default
-selects the initial version at admission. Record and validate the admitted
-version before use; omission neither pins a version nor automatically upgrades
-an existing resource when the default changes. The intended node OS baseline
-is RHCOS 9.x on a supported OpenShift deployment, without assuming a particular
-OpenShift minor version. No `nativeNftables` override is configured.
+`spec.version` is omitted so the installed Operator's CRD default selects each
+control plane's initial version at admission. Inspect and record the admitted
+version before use. This is initial defaulting, not a request to track later
+Operator defaults: an upgrade does not overwrite a version already stored in an
+existing CR. ACM's additive `musthave` comparison does not remove that field just
+because it is absent from the source. Plan subsequent component upgrades explicitly.
+An Operator upgrade alone does not deploy a control plane. The intended node OS
+baseline is RHCOS 9.x on a supported OpenShift deployment, without assuming a
+particular OpenShift minor version. No `nativeNftables` override is configured.
 
 DNS capture is explicitly enabled with
 `values.meshConfig.defaultConfig.proxyMetadata.ISTIO_META_DNS_CAPTURE: "true"`.
@@ -123,7 +126,8 @@ the dedicated Orchestrator L7 path and network-specific session affinity.
 
 ## References
 
-- [OSSM 3.4 installation](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.4/html/installing/ossm-installing-service-mesh)
+- [OSSM 3.5 component versions](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.5/html/release_notes/ossm-release-notes-version-support-tables)
+- [Kubernetes CRD defaulting](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#defaulting)
 - [OSSM 3.4 multi-cluster topologies](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.4/html/installing/ossm-multi-cluster-topologies)
 - [Red Hat release-3.4 Istio API](https://github.com/openshift-service-mesh/sail-operator/blob/release-3.4/api/v1/istio_types.go)
 - [Red Hat release-3.4 values API](https://github.com/openshift-service-mesh/sail-operator/blob/release-3.4/api/v1/values_types.gen.go)

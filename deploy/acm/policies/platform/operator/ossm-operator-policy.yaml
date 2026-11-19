@@ -22,7 +22,7 @@ spec:
             namespace: openshift-operators
             source: redhat-operators
             sourceNamespace: openshift-marketplace
-            channel: stable-3.4
+            channel: stable-3.5
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

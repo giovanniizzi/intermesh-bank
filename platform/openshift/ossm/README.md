@@ -24,9 +24,9 @@ Each overlay renders 17 resources:
 
 The shared control plane retains mesh ID `mesh1`, trust domain `cluster.local`,
 the `openshift` profile and DNS capture. Network1 uses Istio cluster ID `cluster1`;
-network2 uses `cluster2`. Istio and IstioCNI versions are not pinned by these
-sources. The intended node OS baseline is RHCOS 9.x on a supported OpenShift
-installation.
+network2 uses `cluster2`. Istio and IstioCNI omit component versions, leaving
+initial selection to the installed Operator/CRD defaults. The intended node OS
+baseline is RHCOS 9.x on a supported OpenShift installation.
 
 Each complete overlay renders exactly one `Namespace/istio-system`. A native
 Kustomize replacement copies `Istio.spec.values.global.network` to its
@@ -62,9 +62,12 @@ installation resources.
 
 ## Compatibility
 
-The target is OSSM 3.4 Sidecar on supported OpenShift/RHCOS 9.x; ACM mode targets
-ACM 2.17. No OpenShift minor version is pinned. Neither Istio nor IstioCNI sets
-`spec.version`, so inspect and record the selected Operator's admitted versions.
+The target is OSSM 3.5 Sidecar on supported OpenShift/RHCOS 9.x; ACM mode targets
+ACM 2.17. No OpenShift minor or Istio component version is pinned. Both Istio and
+IstioCNI omit `spec.version`; verify admission and record their selected versions.
+An Operator upgrade does not replace a
+version already defaulted and stored in an existing CR. Source omission is not a
+continuous upgrade policy; plan subsequent component upgrades separately.
 This is not a generic upstream Kubernetes installation or an Ambient profile.
 RHEL/RHCOS 10 and native nftables configuration are outside the reference baseline.
 Local rendering compatibility does not establish live product compatibility.

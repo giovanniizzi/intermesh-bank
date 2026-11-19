@@ -14,9 +14,11 @@ The intended node OS baseline is RHCOS 9.x on a supported OpenShift deployment.
 No specific OpenShift minor version is assumed. RHEL/RHCOS 10 is outside this
 baseline, and no `spec.values.global.nativeNftables` override is configured.
 
-`spec.version` is omitted so the installed Red Hat Operator's CRD default selects
-the initial version at admission. Record that admitted version before use; omission
-does not pin a release or automatically upgrade an existing CR when defaults change.
+`spec.version` is omitted, leaving initial version selection to the installed
+Operator/CRD defaults. Verify that the installed CRD accepts the source manifest
+and record the admitted version before use. A later Operator default does not
+overwrite a version already stored in an existing CR; source omission is not a
+continuous upgrade policy.
 
 ## Offline rendering
 
@@ -72,11 +74,12 @@ Before provisioning, verify:
 
 - The shared Placement selects exactly the intended managed clusters, with valid
   ClusterSet access.
-- The approved OSSM 3.4 Operator is installed and its IstioCNI CRD is established,
+- The approved OSSM 3.5 Operator is installed and its IstioCNI CRD is established,
   serves `sailoperator.io/v1`, and accepts the source CR with the selected profile.
 - Required namespaces exist and both dependency Policies report compliance.
 - Node OS and OpenShift support match the RHCOS 9.x baseline.
-- The admitted CNI version is supported and recorded.
+- The admitted CNI version is recorded, supported by the installed Operator and
+  compatible with the selected control-plane versions.
 
 After provisioning, require `IstioCNI/default` to report `Ready=True` and healthy
 status, with `status.observedGeneration` matching `metadata.generation` where
@@ -84,6 +87,6 @@ applicable. Check the CNI DaemonSet's desired and ready counts and healthy cover
 of all intended nodes. CNI readiness is a checkpoint before control-plane
 provisioning; a matching CR spec alone is insufficient.
 
-References: [OSSM 3.4 installation](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.4/html/installing/ossm-installing-service-mesh),
+References: [OSSM 3.5 component versions](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.5/html/release_notes/ossm-release-notes-version-support-tables),
 [Red Hat release-3.4 IstioCNI API](https://github.com/openshift-service-mesh/sail-operator/blob/release-3.4/api/v1/istiocni_types.go),
 [ACM 2.17 Policy dependencies](https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.17/html/governance/hub-policy-framework).

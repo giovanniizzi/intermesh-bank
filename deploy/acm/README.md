@@ -105,8 +105,10 @@ Use the [staged deployment runbook](../../docs/acm-deployment-readiness.md) rath
 than treating the complete 55-object rendering as an unattended cold-start installer.
 It covers Hub access and labels, Operator/CRD readiness, CNI, shared trust, control
 planes, gateways, remote discovery, external dependencies and functional checks.
-The target baseline is ACM 2.17 and OSSM 3.4 Sidecar on supported OpenShift/RHCOS 9.x;
-Istio/CNI versions are not pinned by the custom resources.
+The target baseline is ACM 2.17 and OSSM 3.5 Sidecar on supported OpenShift/RHCOS 9.x;
+Istio and IstioCNI omit `spec.version`, leaving initial version selection to the
+installed Operator/CRD defaults. Verify admission and record both admitted versions;
+omitting a source field does not make an existing component follow new defaults.
 
 Each managed cluster needs Secret `intermesh-backend/intermesh-ledger-db`, key
 `DATABASE_URL`, pointing to the one shared database. Images and the Wasm OCI artifact

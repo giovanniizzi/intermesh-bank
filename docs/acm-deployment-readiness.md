@@ -1,7 +1,7 @@
 # ACM deployment readiness and runbook
 
 This runbook starts with an operational ACM 2.17 Hub and two registered managed
-OpenShift clusters. It covers OSSM 3.4 Sidecar deployment through ACM, not cluster
+OpenShift clusters. It covers OSSM 3.5 Sidecar deployment through ACM, not cluster
 provisioning. The Hub also hosts the shared Red Hat build of Keycloak service;
 both managed clusters use one external PostgreSQL database. See
 [deployment architecture](deployment-architecture.md) for traffic flow and placement.
@@ -54,6 +54,45 @@ checks are not substitutes for live admission or readiness checks.
 The aggregate is not an unattended cold-start installer: Policy dependencies do
 not gate on every external Secret or runtime controller condition. Use the staged
 procedure below rather than applying all 55 objects before prerequisites exist.
+
+## OSSM version and compatibility
+
+The Operator Policy selects `stable-3.5` and retains `upgradeApproval: None`.
+The [OSSM 3.5.0 component table](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.5/html/release_notes/ossm-release-notes-version-support-tables)
+lists the supported components for each Operator release. Both Istio and IstioCNI
+omit `spec.version`, leaving initial selection to the installed Operator/CRD
+defaults. Verify that the installed CRDs accept these manifests and record the
+admitted versions, their support and compatibility. Confirm channel availability
+and the selected CSV in the target catalog. The versioned channel permits later
+3.5 patches, but this Policy
+does not approve their InstallPlans automatically. Component versions have a
+separate lifecycle from the Operator.
+
+Initial version defaulting is not continuous version tracking. A later Operator
+or CRD default does not overwrite a version already defaulted and stored in an
+existing component CR. ACM uses additive `musthave` comparison, so omitting the
+field does not clear a live value. Review effective component versions after an
+Operator upgrade and manage component upgrades separately. Newly created CRs can
+receive a different default; do not recreate components solely to trigger it.
+
+The Sidecar profiles retain `sailoperator.io/v1`, gateway injection, shared mesh
+trust, reciprocal discovery and the dedicated Orchestrator L7 East-West path.
+There are no source-managed IstioRevision, EnvoyFilter or Kubernetes Gateway API
+resources. Existing Istio Gateway, VirtualService, DestinationRule, ServiceEntry,
+JWT and authorization definitions are preserved. No Ambient resources are added.
+
+Review the [3.5 release notes](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.5/html/release_notes/ossm-release-notes)
+when validating outage scenarios: unhealthy-endpoint routing defaults and
+consistent-hash endpoint updates can affect observed failover. Strict Gateway
+merging applies to managed Gateway API proxies; this profile uses injected
+gateway Deployments with Istio Gateway resources. Validate the shared 15443 L4/L7
+listeners, high-port ingress mapping, DNS capture, workload principals, cookies
+and Fraud timeout behavior on the deployed proxies.
+
+The [3.5 feature table](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.5/html/release_notes/ossm-release-notes-feature-support-tables)
+supports the Sidecar WasmPlugin API; it does not certify the custom extension
+module. Verify OCI retrieval and security-header execution with the new proxy.
+`FAIL_OPEN` means an unloaded plugin can leave application traffic working.
 
 ## Configuration and bootstrap inputs
 
@@ -244,6 +283,91 @@ Provision external Secrets through the approved secure procedure, and initially
 provision the realm through the validated `.local/prerequisites/keycloak` rendering. These
 are separate **MUTATING** administrative operations, not ACM aggregate resources.
 Do not create empty Secrets or expose connection strings in command arguments.
+
+### Updating the Operator before mesh provisioning
+
+When Stage 0 and bootstrap are already active but no mesh components have been
+provisioned, update the Operator through its existing ACM owner. Regenerate the
+private aggregate and stages first. The updated Stage 1 contains the same ten
+objects; only `intermesh-ossm-operator` changes its Subscription channel from
+`stable-3.4` to `stable-3.5`. Do not reapply Stage 0 or apply Stages 2–6 for this
+operation. Reapplying Stage 1 also reconciles the four other bootstrap Policies,
+so review any live drift before proceeding.
+
+Select each verified managed-cluster context and run these read-only checks:
+
+```sh
+oc config current-context
+oc -n openshift-marketplace get packagemanifest servicemeshoperator3 \
+  -o jsonpath='{.status.catalogSource}{"\n"}{range .status.channels[*]}{.name}{"\t"}{.currentCSV}{"\t"}{.currentCSVDesc.version}{"\n"}{end}'
+oc -n openshift-operators get operatorgroups
+oc -n openshift-operators get subscription servicemeshoperator3 \
+  -o custom-columns='CHANNEL:.spec.channel,APPROVAL:.spec.installPlanApproval,INSTALLED:.status.installedCSV,CURRENT:.status.currentCSV,PLAN:.status.installPlanRef.name'
+oc -n openshift-operators get csv,installplans
+oc get istiocnis.sailoperator.io,istios.sailoperator.io
+```
+
+Require `redhat-operators` to offer `stable-3.5` with the reviewed Operator 3.5.0
+CSV and a supported upgrade path. If another patch is offered, review its component
+table before proceeding. Confirm compatible AllNamespaces OperatorGroup scope,
+OLM `Manual` approval and no unexpected approved/running InstallPlan. Confirm
+there are no pre-existing mesh components that would require a data-plane upgrade
+plan. Stop if these conditions do not hold; do not substitute `stable`.
+
+On the verified Hub context, review Policy status and then update only Stage 1:
+
+```sh
+oc config current-context
+oc -n open-cluster-management-policies get policy intermesh-ossm-operator
+# MUTATING: updates the ACM-owned desired channel on both selected clusters.
+oc apply -f .local/deployment/stage-1-bootstrap.yaml
+```
+
+`upgradeApproval: None` prevents ACM from approving upgrades. It does not cancel
+an already approved InstallPlan or block another administrator from approving
+one. Do not add `subscription.installPlanApproval` to OperatorPolicy or edit the
+managed Subscription. Keep the existing approval strategy and explicitly review
+the OLM InstallPlan on each managed cluster after ACM reconciles the new channel:
+
+```sh
+oc -n openshift-operators get subscription servicemeshoperator3 \
+  -o custom-columns='CHANNEL:.spec.channel,APPROVAL:.spec.installPlanApproval,INSTALLED:.status.installedCSV,CURRENT:.status.currentCSV,PLAN:.status.installPlanRef.name'
+IM_INSTALLPLAN="$(oc -n openshift-operators get subscription servicemeshoperator3 -o jsonpath='{.status.installPlanRef.name}')"
+oc -n openshift-operators get installplan "$IM_INSTALLPLAN" \
+  -o custom-columns='NAME:.metadata.name,CSVS:.spec.clusterServiceVersionNames,APPROVAL:.spec.approval,APPROVED:.spec.approved,PHASE:.status.phase'
+```
+
+Wait for channel `stable-3.5`, the reviewed target CSV and its corresponding new
+InstallPlan. Do not approve a stale plan immediately after updating the Hub.
+Require the plan to match the reviewed catalog CSV, use Manual approval and await
+approval. Review the plan's resources and dependencies; stop if it includes
+unrelated operators or unexpected changes. Only after that review:
+
+```sh
+# MUTATING: deliberate approval of the reviewed OLM plan, not a Subscription edit.
+oc -n openshift-operators patch installplan "$IM_INSTALLPLAN" \
+  --type=merge -p '{"spec":{"approved":true}}'
+oc -n openshift-operators wait --for=jsonpath='{.status.phase}'=Complete \
+  "installplan/$IM_INSTALLPLAN" --timeout=10m
+IM_CSV="$(oc -n openshift-operators get subscription servicemeshoperator3 -o jsonpath='{.status.installedCSV}')"
+oc -n openshift-operators get csv "$IM_CSV" \
+  -o custom-columns='NAME:.metadata.name,VERSION:.spec.version,PHASE:.status.phase'
+oc -n openshift-operators get csv "$IM_CSV" \
+  -o jsonpath='{range .spec.install.spec.deployments[*]}{.name}{"\n"}{end}'
+```
+
+Require CSV version 3.5.0 and phase `Succeeded`. Use each deployment name printed
+by the last command to run `oc -n openshift-operators rollout status
+deployment/<name>`. Check Subscription conditions and new Operator CRD/webhook
+readiness as well as InstallPlan completion. Repeat approval and validation for
+the other managed cluster, then check Hub Policy compliance on both clusters.
+An available upgrade can coexist with `Compliant` under the Policy's default
+compliance settings; compliance alone is not proof of the new installed version.
+
+Completing this procedure upgrades only the Operator. Provision IstioCNI through
+Stage 2 and each control plane through Stage 3 only after their separate readiness
+and trust gates pass. Record each control plane's defaulted version and the CNI
+version, and verify they are supported together before starting workloads.
 
 ### Read-only checkpoint commands
 
