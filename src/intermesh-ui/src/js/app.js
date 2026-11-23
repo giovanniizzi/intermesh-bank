@@ -17,6 +17,9 @@ const AUTHENTICATION_PAUSED = 'Authentication is unavailable. Requests are pause
 let sourceAccountInput, onboardingTarget, historyTableBody, toast, logoutBtn;
 let transferRequests = null;
 let transferLoadError = false;
+let accountState = 'loading';
+let onboardingBusy = false;
+let historyLoaded = false;
 
 const keycloak = new Keycloak({
     url: 'PLACEHOLDER_KEYCLOAK_URL',
@@ -62,6 +65,8 @@ keycloak.init({
         const userID = keycloak.tokenParsed.preferred_username;
         if (userID) {
             checkExistingAccount(userID);
+        } else {
+            renderAccountState('error', 'Your account could not be loaded. Sign in again to continue.');
         }
     } else {
         window.location.reload();
@@ -87,16 +92,71 @@ function populateUserProfile() {
     (firstName || lastName) 
         ? `${firstName} ${lastName}`.trim() 
         : (keycloak.tokenParsed.preferred_username || "Authenticated User");
-    document.querySelector('.user-role').textContent = "Verified Profile Context";
-    if (keycloak.tokenParsed.given_name && keycloak.tokenParsed.family_name) {
-        document.querySelector('.avatar').textContent = 
-            keycloak.tokenParsed.given_name[0] + keycloak.tokenParsed.family_name[0];
+    document.querySelector('.user-role').textContent = 'Personal banking';
+    document.querySelector('.avatar').textContent = document.querySelector('.user-name').textContent
+        .trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+}
+
+function renderAccountState(state, message) {
+    accountState = state;
+    const canOpen = state === 'empty' || state === 'creating';
+    const messages = {
+        loading: 'Loading your account…',
+        empty: 'Open an account to start banking with InterMesh.',
+        creating: 'Opening your account. Please wait…',
+        error: 'We couldn’t load your account. Please try again.',
+        'signed-out': 'Sign in to view your account.'
+    };
+    document.getElementById('accountTitle').textContent = canOpen ? 'Open your account' : 'Account Overview';
+    const status = document.getElementById('accountStatus');
+    status.textContent = message || messages[state] || '';
+    status.hidden = state === 'ready';
+    status.className = state === 'error' ? 'account-status error' : 'account-status';
+    document.getElementById('accountOverview').setAttribute('aria-busy', String(state === 'loading' || onboardingBusy));
+    document.getElementById('onboardingForm').classList[canOpen ? 'remove' : 'add']('hidden');
+    onboardingTarget.classList[state === 'ready' ? 'remove' : 'add']('hidden');
+    document.getElementById('retryAccount').hidden = state !== 'error' || authenticationBlocked;
+    document.getElementById('btnOnboard').disabled = state !== 'empty' || onboardingBusy || authenticationBlocked;
+    document.getElementById('btnOnboard').textContent = onboardingBusy ? 'Opening account…' : 'Open account';
+}
+
+function showAccount(account) {
+    if (!account || typeof account.account_id !== 'string' || !account.account_id.trim()
+            || typeof account.iban !== 'string' || !account.iban.trim() || !Number.isFinite(account.balance)) {
+        throw new Error('Account information is unavailable.');
     }
+    activeAccountID = account.account_id;
+    sourceAccountInput.value = activeAccountID;
+    const balance = document.createElement('div');
+    balance.className = 'account-balance';
+    const label = textElement('span', 'Available balance');
+    label.className = 'balance-label';
+    const value = textElement('strong', formatMoney(account.balance));
+    value.className = 'balance-value';
+    const note = textElement('p', 'Balance snapshot at account load. Reload to update.');
+    note.className = 'balance-note';
+    balance.append(label, value, note);
+    const details = document.createElement('dl');
+    details.className = 'account-details';
+    for (const [title, text] of [['Account number', activeAccountID], ['IBAN', account.iban]]) {
+        const item = document.createElement('div');
+        const description = textElement('dd', text);
+        if (title === 'IBAN') description.className = 'iban';
+        item.append(textElement('dt', title), description);
+        details.append(item);
+    }
+    onboardingTarget.replaceChildren(balance, details);
+    renderAccountState('ready');
+    historyLoaded = false;
+    renderHistoryMessage('Loading transactions…');
+    renderTransferState();
+    startLedgerPolling(activeAccountID);
 }
 
 // --- ACCOUNT DISCOVERY ON PAGE RELOAD ---
 async function checkExistingAccount(userID) {
     const context = requestContext();
+    renderAccountState('loading');
     try {
         console.log("[Account Lookup] Checking for an existing account.");
         const response = await authenticatedFetch(`${GATEWAY_URL}/api/v1/accounts/${userID}`, {}, context);
@@ -105,33 +165,13 @@ async function checkExistingAccount(userID) {
             const accountData = await response.json();
             if (!isCurrentRequest(context)) return;
             
-            // Update the internal state variable
-            activeAccountID = accountData.account_id;
-            
-            // Hide onboarding because the user already has an active account
-            document.getElementById('onboardingForm').classList.add('hidden');
-            
-            // CRUCIAL FIX: Set the account ID directly in the transfer's "Source Account" field
-            if (sourceAccountInput) {
-                sourceAccountInput.value = activeAccountID;
-            }
-            
-            // Update the account summary with the welcome message
-            onboardingTarget.replaceChildren(
-                textElement('strong', `Welcome Back ${accountData.holder_name}!`), document.createElement('br'),
-                textElement('strong', 'Account Number:'), document.createTextNode(` ${activeAccountID}`), document.createElement('br'),
-                textElement('strong', 'IBAN:'), document.createTextNode(` ${accountData.iban}`), document.createElement('br'),
-                textElement('strong', 'Balance snapshot (reload to update):'), document.createTextNode(` €${accountData.balance.toFixed(2)}`)
-            );
-            onboardingTarget.classList.remove('hidden');
-            
-            // Start polling to display Ledger transactions
-            renderTransferState();
-            startLedgerPolling(activeAccountID);
-        } else if (response.status === 404) {
-            console.log("[Channel Hub Context] No pre-existing account discovered. Fresh onboarding required.");
+            showAccount(accountData);
+        } else if (isCurrentRequest(context)) {
+            renderAccountState(response.status === 404 ? 'empty' : 'error',
+                authenticationBlocked ? AUTHENTICATION_PAUSED : undefined);
         }
     } catch {
+        if (isCurrentRequest(context)) renderAccountState('error', authenticationBlocked ? AUTHENTICATION_PAUSED : undefined);
         console.error("[Account Lookup] Account discovery failed.");
     }
 }
@@ -142,6 +182,7 @@ function startLedgerPolling(accountId) {
     const context = requestContext();
     const runPolling = () => {
         if (authenticationBlocked || !isCurrentRequest(context) || accountId !== activeAccountID) return;
+        document.getElementById('historyUpdateNote').textContent = 'Updates every 15 seconds while this tab is visible';
         if (pollingInterval) clearInterval(pollingInterval);
         
         fetchLedgerHistory(accountId);
@@ -156,6 +197,7 @@ function startLedgerPolling(accountId) {
             clearInterval(pollingInterval);
             pollingInterval = null;
         }
+        document.getElementById('historyUpdateNote').textContent = 'Updates paused while this tab is hidden';
     };
 
     pollingVisibilityHandler = () => {
@@ -178,6 +220,8 @@ function stopLedgerPolling() {
     pollingInterval = null;
     if (pollingVisibilityHandler) document.removeEventListener('visibilitychange', pollingVisibilityHandler);
     pollingVisibilityHandler = null;
+    document.getElementById('historyUpdateNote').textContent = activeAccountID
+        ? 'Updates paused' : 'Load an account to view activity';
 }
 
 async function fetchLedgerHistory(accountId) {
@@ -187,11 +231,19 @@ async function fetchLedgerHistory(accountId) {
     historyRequest = context;
     try {
         const response = await authenticatedFetch(`${GATEWAY_URL}/api/v1/account/${accountId}/transactions`, {}, context);
-        if (!response.ok) return;
+        if (!response.ok) throw new Error('History unavailable');
 
         const transactions = await response.json();
-        if (isCurrentRequest(context) && accountId === activeAccountID) renderHistoryTable(transactions);
-    } catch {} finally {
+        if (isCurrentRequest(context) && accountId === activeAccountID) {
+            renderHistoryTable(transactions);
+            historyLoaded = true;
+        }
+    } catch {
+        if (isCurrentRequest(context) && accountId === activeAccountID && !historyLoaded) {
+            renderHistoryMessage(authenticationBlocked ? 'Sign in again to load transaction history.'
+                : 'Transaction history is unavailable. We’ll check again on the next update.');
+        }
+    } finally {
         if (historyRequest === context) historyRequest = null;
     }
 }
@@ -199,6 +251,31 @@ async function fetchLedgerHistory(accountId) {
 function setupEventListeners() {
     const onboardingForm = document.getElementById('onboardingForm');
     const transferForm = document.getElementById('transferForm');
+    const navigation = [...document.querySelectorAll('.nav-item')];
+    const updateNavigation = () => {
+        const selected = navigation.find(link => link.getAttribute('href') === window.location.hash) || navigation[0];
+        for (const link of navigation) {
+            link.classList[link === selected ? 'add' : 'remove']('active');
+            if (link === selected) link.setAttribute('aria-current', 'location');
+            else link.removeAttribute('aria-current');
+        }
+    };
+    window.addEventListener('hashchange', updateNavigation);
+    updateNavigation();
+    document.getElementById('retryAccount').addEventListener('click', () => {
+        const userID = keycloak.tokenParsed?.preferred_username;
+        if (!authenticationBlocked && userID) checkExistingAccount(userID);
+    });
+    for (const id of ['sourceAccount', 'targetAccount', 'transferAmount']) {
+        document.getElementById(id).addEventListener('input', () => {
+            document.getElementById(id).removeAttribute('aria-invalid');
+            showTransferError('');
+        });
+    }
+    transferForm.addEventListener('invalid', event => {
+        event.target.setAttribute('aria-invalid', 'true');
+        showTransferError(event.target.validationMessage);
+    }, true);
 
     if (logoutBtn) {
         logoutBtn.addEventListener('click', () => {
@@ -217,12 +294,15 @@ function setupEventListeners() {
     // Pipeline Onboarding
     onboardingForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (authenticationBlocked || sessionEnded) return;
+        if (authenticationBlocked || sessionEnded || onboardingBusy || accountState !== 'empty') return;
         const context = requestContext();
         const payload = {
             holder_name: document.getElementById('holderName').value,
             initial_deposit: parseFloat(document.getElementById('initialDeposit').value)
         };
+        onboardingBusy = true;
+        document.getElementById('onboardingError').hidden = true;
+        renderAccountState('creating');
         try {
             const response = await authenticatedFetch(`${GATEWAY_URL}/api/v1/accounts`, {
                 method: 'POST',
@@ -232,25 +312,26 @@ function setupEventListeners() {
                 body: JSON.stringify(payload)
             }, context);
 
-            if (!response.ok) throw new Error('Onboarding execution rejected by Mesh guards.');
+            if (!response.ok) throw new Error('Account creation was not confirmed. Check your account before trying again.');
             
             const result = await response.json();
             if (!isCurrentRequest(context)) return;
-            const accountDetails = result.account_details;
-            activeAccountID = accountDetails.account_id;
-
-            sourceAccountInput.value = activeAccountID; // Populate the transfer field immediately after account creation
-            onboardingTarget.replaceChildren(
-                textElement('strong', 'Active Account Provisioned:'), document.createTextNode(` ${activeAccountID} `),
-                document.createElement('br'), textElement('strong', 'IBAN:'), document.createTextNode(` ${accountDetails.iban}`)
-            );
-            onboardingTarget.classList.remove('hidden');
-            
-            renderTransferState();
-            showToast('Account successfully provisioned in Core Ledger!', 'success');
-            startLedgerPolling(activeAccountID);
-        } catch (error) {
-            if (isCurrentRequest(context)) showToast(authenticationBlocked ? AUTHENTICATION_PAUSED : error.message, 'error');
+            showAccount(result.account_details);
+            showToast('Your account is ready.', 'success');
+        } catch {
+            if (isCurrentRequest(context)) {
+                const message = authenticationBlocked ? AUTHENTICATION_PAUSED
+                    : 'Account creation was not confirmed. Check your account before trying again.';
+                renderAccountState(authenticationBlocked ? 'empty' : 'error', message);
+                const error = document.getElementById('onboardingError');
+                error.textContent = message;
+                error.hidden = false;
+            }
+        } finally {
+            if (isCurrentRequest(context)) {
+                onboardingBusy = false;
+                renderAccountState(accountState, document.getElementById('accountStatus').textContent);
+            }
         }
     });
 
@@ -315,6 +396,8 @@ function pauseAuthenticatedRequests() {
     authenticationBlocked = true;
     stopLedgerPolling();
     if (sourceAccountInput) {
+        document.getElementById('btnOnboard').disabled = true;
+        document.getElementById('retryAccount').hidden = true;
         renderTransferState();
         showToast(AUTHENTICATION_PAUSED, 'error');
     }
@@ -384,6 +467,8 @@ function suspendTransferView() {
     transferRequests = null;
     transferLoadError = false;
     activeAccountID = null;
+    onboardingBusy = false;
+    historyLoaded = false;
     stopLedgerPolling();
     if (!sourceAccountInput) return;
     sourceAccountInput.value = '';
@@ -391,11 +476,14 @@ function suspendTransferView() {
     document.getElementById('transferAmount').value = '';
     onboardingTarget.textContent = '';
     onboardingTarget.classList.add('hidden');
-    document.getElementById('onboardingForm').classList.remove('hidden');
+    renderAccountState('signed-out');
+    document.getElementById('onboardingError').hidden = true;
+    showTransferError('');
     document.getElementById('holderName').value = '';
     document.getElementById('initialDeposit').value = '1000.00';
     renderHistoryTable([]);
     document.querySelector('.user-name').textContent = 'Sign in to continue';
+    document.querySelector('.user-role').textContent = 'Signed out';
     document.querySelector('.avatar').textContent = '--';
     toast.classList.add('hidden');
     renderTransferState();
@@ -441,6 +529,8 @@ function renderTransferState() {
         document.getElementById('transferAmount').value = active.amount;
     }
     document.getElementById('btnTransfer').disabled = !requests || unavailable || Boolean(active) || requests.storageFailed;
+    document.getElementById('btnTransfer').textContent = busy ? 'Processing…' : 'Send transfer';
+    document.getElementById('transferForm').setAttribute('aria-busy', String(busy));
     document.getElementById('checkTransfer').disabled = !active || unavailable;
     document.getElementById('replayTransfer').disabled = !active || unavailable || requests?.storageFailed
         || ['APPROVED', 'FAILED', 'REJECTED'].includes(active?.outcome);
@@ -454,8 +544,14 @@ function renderTransferState() {
 async function runTransferAction(action) {
     const requests = transferRequests;
     if (authenticationBlocked || !requests || !requests.isCurrent() || requests.busy) return;
+    showTransferError('');
     try { await action(requests); }
-    catch (error) { if (requests.isCurrent()) showToast(error.message, 'error'); }
+    catch (error) {
+        if (requests.isCurrent()) {
+            showTransferError(error.message);
+            showToast(error.message, 'error');
+        }
+    }
     finally {
         if (requests === transferRequests && requests.isCurrent()) {
             renderTransferState();
@@ -470,24 +566,54 @@ function textElement(tag, text) {
     return element;
 }
 
+function showTransferError(message) {
+    const error = document.getElementById('transferError');
+    error.textContent = message;
+    error.hidden = !message;
+}
+
+function formatMoney(value) {
+    return Number.isFinite(value) ? new Intl.NumberFormat('en-IE', { style: 'currency', currency: 'EUR' }).format(value) : 'Unavailable';
+}
+
+function formatTimestamp(value) {
+    // PostgreSQL timestamps have no timezone here; preserve the Ledger's wall-clock time.
+    const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):\d{2}(?:\.\d+)?$/.exec(String(value));
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (!match || !months[Number(match[2]) - 1]) return value;
+    return `${match[3]} ${months[Number(match[2]) - 1]} ${match[1]}, ${match[4]}:${match[5]}`;
+}
+
+function renderHistoryMessage(message) {
+    document.getElementById('historyTable').classList.add('is-empty');
+    document.getElementById('tableHelp').hidden = true;
+    const row = document.createElement('tr');
+    const cell = textElement('td', message);
+    cell.colSpan = 5;
+    cell.className = 'empty-state';
+    row.append(cell);
+    historyTableBody.replaceChildren(row);
+}
+
 function renderHistoryTable(transactions) {
     historyTableBody.replaceChildren();
     if (!transactions || transactions.length === 0) {
-        const row = document.createElement('tr');
-        const cell = textElement('td', 'No transactions recorded yet for this asset.');
-        cell.colSpan = 5;
-        cell.className = 'empty-state';
-        row.append(cell);
-        historyTableBody.append(row);
+        renderHistoryMessage(activeAccountID ? 'No transactions found for this account.'
+            : 'Load or open an account to view its transactions.');
         return;
     }
+    document.getElementById('historyTable').classList.remove('is-empty');
+    document.getElementById('tableHelp').hidden = false;
     for (const tx of transactions) {
         const row = document.createElement('tr');
+        const knownStatus = ['PENDING', 'APPROVED', 'FAILED'].includes(tx.status);
+        const statusLabel = knownStatus ? tx.status[0] + tx.status.slice(1).toLowerCase() : tx.status;
         const fields = [['strong', tx.transaction_id], ['code', tx.target_iban],
-            ['strong', `€${tx.amount.toFixed(2)}`], ['span', tx.status], ['small', tx.timestamp]];
-        for (const [tag, text] of fields) {
+            ['strong', formatMoney(tx.amount)], ['span', statusLabel], ['small', formatTimestamp(tx.timestamp)]];
+        for (const [index, [tag, text]] of fields.entries()) {
             const cell = document.createElement('td');
             const content = textElement(tag, text);
+            if (index === 2) cell.className = 'amount-cell';
             if (tag === 'span') {
                 const status = String(tx.status).toLowerCase();
                 content.className = ['pending', 'approved', 'failed'].includes(status)

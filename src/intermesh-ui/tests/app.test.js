@@ -24,17 +24,26 @@ class Element {
         this.tagName = tag.toUpperCase();
         this.value = ''; this.textContent = ''; this.innerHTML = ''; this.children = [];
         this.disabled = false; this.hidden = false; this.listeners = {};
+        this.attributes = new Map();
         this.classes = new Set();
         this.classList = { add: name => this.classes.add(name), remove: name => this.classes.delete(name) };
     }
+    get className() { return [...this.classes].join(' '); }
+    set className(value) { this.classes = new Set(String(value).split(/\s+/).filter(Boolean)); }
     get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
     set textContent(value) { this._text = String(value ?? ''); this._html = ''; this.children = []; }
     get innerHTML() { return this._html; }
     set innerHTML(value) { this._html = String(value); this._text = ''; this.children = []; }
     replaceChildren(...children) { this._text = ''; this._html = ''; this.children = [...children]; }
     append(...children) { this.children.push(...children); }
+    setAttribute(name, value) {
+        this.attributes.set(name, String(value));
+        if (name === 'class') this.className = value;
+    }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
+    removeAttribute(name) { this.attributes.delete(name); }
     addEventListener(type, listener) { this.listeners[type] = listener; }
-    fire(type) { if (!this.disabled || type === 'submit') return this.listeners[type]?.({ target: this, preventDefault() {} }); }
+    fire(type, details = {}) { if (!this.disabled || type === 'submit') return this.listeners[type]?.({ target: this, preventDefault() {}, ...details }); }
 }
 function boot(shared = null) {
     const env = shared || { storage: new Map(), calls: [], uuidCount: 0, confirmations: [], confirm: false,
@@ -47,17 +56,27 @@ function boot(shared = null) {
     const visibilityListeners = new Set();
     let intervalID = 0;
     const html = readFile('src/intermesh-ui/src/index.html');
-    const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(match => [match[1], new Element()]));
+    const elements = new Map();
+    for (const match of html.matchAll(/<([a-z][a-z0-9-]*)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
+        const element = new Element(match[1]);
+        for (const attribute of match[2].matchAll(/([\w-]+)="([^"]*)"/g)) element.setAttribute(attribute[1], attribute[2]);
+        element.hidden = /\bhidden(?:\s|$)/.test(match[2]);
+        element.disabled = /\bdisabled(?:\s|$)/.test(match[2]);
+        elements.set(match[3], element);
+    }
     for (const selector of ['.user-name', '.user-role', '.avatar']) elements.set(selector, new Element());
     const document = {
         getElementById(id) { assert(elements.has(id), 'Missing HTML element ' + id); return elements.get(id); },
         querySelector: selector => elements.get(selector), createElement: tag => new Element(tag),
+        querySelectorAll: selector => [...elements.values()].filter(element => selector === '.nav-item' && element.classes.has('nav-item')),
         createTextNode: text => ({ nodeType: 3, textContent: String(text) }),
         visibilityState: 'visible',
         addEventListener(type, listener) { if (type === 'visibilitychange') visibilityListeners.add(listener); },
         removeEventListener(type, listener) { if (type === 'visibilitychange') visibilityListeners.delete(listener); }
     };
-    const window = { location: { origin: 'https://bank-network1.example.invalid', reload() {} },
+    const windowListeners = new Map();
+    const window = { location: { origin: 'https://bank-network1.example.invalid', hash: '', reload() {} },
+        addEventListener: (event, callback) => windowListeners.set(event, callback),
         crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++env.uuidCount).padStart(12, '0')}` },
         sessionStorage: { getItem: key => env.storage.get(key) ?? null, setItem: (key, value) => env.storage.set(key, value) },
         confirm: text => { env.confirmations.push(text); return env.confirm; } };
@@ -91,6 +110,7 @@ function boot(shared = null) {
         callback => { intervals.set(++intervalID, callback); return intervalID; },
         id => intervals.delete(id), () => {});
     return { env, elements, get: id => elements.get(id), window, html, intervals, visibilityListeners,
+        navigate(hash) { window.location.hash = hash; windowListeners.get('hashchange')?.(); },
         tick() { for (const callback of [...intervals.values()]) callback(); },
         visibility(state) {
             document.visibilityState = state;
@@ -236,7 +256,7 @@ test('history renders hostile financial fields as text and preserves table struc
     equal(table.children.length, 1);
     equal(table.children[0].children[0].colSpan, 5);
     equal(table.children[0].children[0].className, 'empty-state');
-    assert(table.textContent.includes('No transactions recorded'));
+    equal(table.textContent, 'Load or open an account to view its transactions.');
 });
 
 test('account summary uses text and labels the balance as a snapshot through transfer and recovery', async () => {
@@ -245,9 +265,10 @@ test('account summary uses text and labels the balance as a snapshot through tra
     ui.env.respondAccount = async url => url.includes('/transactions') ? reply(200, []) : reply(200, account);
     await settle();
     const summary = ui.get('onboardingTarget');
-    assert(summary.textContent.includes(account.holder_name));
+    assert(!summary.textContent.includes(account.holder_name));
     assert(summary.textContent.includes(account.iban));
-    assert(summary.textContent.includes('Balance snapshot (reload to update): €123.45'));
+    assert(summary.textContent.includes('Available balance€123.45'));
+    assert(summary.textContent.includes('Balance snapshot at account load. Reload to update.'));
     assert(!summary.textContent.includes('Live Balance'));
     assertNoHTMLParsing(summary);
     const snapshot = summary.textContent;
@@ -360,7 +381,7 @@ test('successive polling cycles refresh expiring tokens before sending history r
     equal(ui.env.loginCalls, 0);
 });
 
-test('overlapping polling and onboarding share one refresh and never use the earlier token', async () => {
+test('a loaded account prevents another onboarding POST while a poll refresh is pending', async () => {
     const ui = bootWithAccount(); await settle();
     const refresh = deferred(), before = ui.env.refreshCalls.length;
     ui.env.refresh = () => refresh.promise;
@@ -376,9 +397,11 @@ test('overlapping polling and onboarding share one refresh and never use the ear
     ui.env.refresh = async () => false;
     refresh.resolve(true); await settle();
     const calls = ui.env.readCalls.slice(2);
-    assert(calls.length >= 2);
+    equal(calls.length, 1);
     assert(calls.every(call => call.headers.Authorization === 'Bearer synthetic-shared-refresh'));
-    equal(calls.filter(call => call.method === 'POST').length, 1);
+    equal(calls.filter(call => call.method === 'POST').length, 0);
+    assert(ui.get('onboardingForm').classes.has('hidden'));
+    assert(ui.get('btnOnboard').disabled);
     equal(ui.visibilityListeners.size, 1);
     equal(ui.intervals.size, 1);
 });
@@ -480,7 +503,7 @@ test('explicit session termination uses the adapter login once and preserves sav
 
 for (const operation of ['history', 'onboarding', 'transfer']) {
     test(`logout during awaited ${operation} refresh prevents the request even if a late token has the same subject`, async () => {
-        const ui = bootWithAccount(); await settle();
+        const ui = operation === 'onboarding' ? boot() : bootWithAccount(); await settle();
         const refresh = deferred();
         ui.env.refresh = () => refresh.promise;
         if (operation === 'history') ui.tick();
@@ -613,6 +636,237 @@ test('refresh failure before a financial POST retains its UUID and never sends o
     assert(ui.get('transferDetails').textContent.includes(saved.intents[0].transfer_request_id));
     ui.get('transferForm').fire('submit'); ui.get('checkTransfer').fire('click'); await settle();
     equal(ui.env.calls.length, 0); equal(ui.env.uuidCount, 1);
+});
+
+test('dashboard headings, navigation targets and contextual recovery help are meaningful', async () => {
+    const ui = boot(); await settle();
+    assert(ui.html.includes('<h1>My Dashboard</h1>'));
+    assert(ui.html.includes('>New Transfer</h2>'));
+    assert(ui.html.includes('>Transaction History</h2>'));
+    assert(!ui.html.includes('href="#"'));
+    for (const [linkID, sectionID] of [['dashboardLink', 'dashboard'], ['accountLink', 'accountOverview'],
+        ['transfersLink', 'transfers'], ['historyLink', 'transactions']]) {
+        equal(ui.get(linkID).getAttribute('href'), '#' + sectionID);
+        assert(ui.get(sectionID));
+        ui.navigate('#' + sectionID);
+        equal(ui.get(linkID).getAttribute('aria-current'), 'location');
+        equal([...ui.elements.values()].filter(element => element.getAttribute('aria-current') === 'location').length, 1);
+        assert(ui.get(linkID).classes.has('active'));
+    }
+    ui.navigate('#unknown');
+    equal(ui.get('dashboardLink').getAttribute('aria-current'), 'location');
+    assert(/<details class="context-help">[\s\S]*network1 and network2[\s\S]*<\/details>/.test(ui.html));
+    assert(/<details class="request-details">[\s\S]*id="transferDetails"/.test(ui.html));
+});
+
+test('account loading and no-account states never display a placeholder balance', async () => {
+    const ui = boot(), response = deferred();
+    ui.env.respondAccount = () => response.promise;
+    await settle();
+    equal(ui.get('accountStatus').textContent, 'Loading your account…');
+    equal(ui.get('accountOverview').getAttribute('aria-busy'), 'true');
+    assert(ui.get('onboardingForm').classes.has('hidden'));
+    assert(ui.get('onboardingTarget').classes.has('hidden'));
+    equal(ui.get('onboardingTarget').textContent, '');
+    assert(ui.get('btnOnboard').disabled);
+    response.resolve(reply(404, {})); await settle();
+    equal(ui.get('accountTitle').textContent, 'Open your account');
+    assert(!ui.get('onboardingForm').classes.has('hidden'));
+    assert(!ui.get('btnOnboard').disabled);
+    equal(ui.get('accountOverview').getAttribute('aria-busy'), 'false');
+    equal(ui.get('onboardingTarget').textContent, '');
+    equal(ui.env.calls.length, 0);
+});
+
+test('account failures stay distinct from no account and allow only an explicit read-only retry', async () => {
+    const ui = boot();
+    ui.env.respondAccount = async () => reply(503, {});
+    await settle();
+    assert(ui.get('accountStatus').textContent.includes('couldn’t load'));
+    assert(ui.get('onboardingForm').classes.has('hidden'));
+    assert(!ui.get('retryAccount').hidden);
+    equal(ui.get('onboardingTarget').textContent, '');
+    equal(ui.env.readCalls.length, 1);
+    ui.env.respondAccount = async url => url.includes('/transactions') ? reply(200, []) : reply(200, accountFixture());
+    ui.get('retryAccount').fire('click'); await settle();
+    equal(ui.env.readCalls.filter(call => call.url.includes('/accounts/')).length, 2);
+    assert(ui.env.readCalls.every(call => !call.method));
+    equal(ui.get('accountTitle').textContent, 'Account Overview');
+    assert(!ui.get('onboardingTarget').classes.has('hidden'));
+    assert(ui.get('retryAccount').hidden);
+});
+
+test('loaded account uses a real zero balance and presents the customer name only in the profile', async () => {
+    const ui = bootWithAccount();
+    ui.env.keycloak.tokenParsed = { ...ui.env.claims, given_name: 'Synthetic', family_name: 'Customer' };
+    ui.env.respondAccount = async url => url.includes('/transactions') ? reply(200, [])
+        : reply(200, { ...accountFixture(), holder_name: 'Synthetic Customer', balance: 0 });
+    await settle();
+    equal(ui.elements.get('.user-name').textContent, 'Synthetic Customer');
+    equal(ui.elements.get('.avatar').textContent, 'SC');
+    const summary = ui.get('onboardingTarget');
+    assert(summary.textContent.includes('Available balance€0.00'));
+    assert(summary.textContent.includes('Account numberACC-A'));
+    assert(summary.textContent.includes('IBANSYNTHETIC-IBAN'));
+    assert(!summary.textContent.includes('Synthetic Customer'));
+    assert(summary.textContent.includes('Balance snapshot'));
+    assert(ui.get('accountStatus').hidden);
+    assertNoHTMLParsing(summary);
+});
+
+test('missing account balance is not coerced to a real zero balance', async () => {
+    const ui = boot();
+    ui.env.respondAccount = async () => reply(200, { ...accountFixture(), balance: null });
+    await settle();
+    equal(ui.get('onboardingTarget').textContent, '');
+    assert(ui.get('onboardingForm').classes.has('hidden'));
+    assert(ui.get('accountStatus').textContent.includes('couldn’t load'));
+    equal(ui.intervals.size, 0);
+});
+
+test('opening an account has a busy state, ignores double submit and shows the returned balance', async () => {
+    const ui = boot(); await settle();
+    const response = deferred();
+    ui.env.respondAccount = () => response.promise;
+    ui.get('holderName').value = 'Synthetic Owner';
+    ui.get('initialDeposit').value = '20.00';
+    ui.get('onboardingForm').fire('submit'); ui.get('onboardingForm').fire('submit'); await settle();
+    assert(ui.get('btnOnboard').disabled);
+    equal(ui.get('btnOnboard').textContent, 'Opening account…');
+    equal(ui.get('accountOverview').getAttribute('aria-busy'), 'true');
+    equal(ui.env.readCalls.filter(call => call.method === 'POST').length, 1);
+    equal(ui.get('onboardingTarget').textContent, '');
+    ui.env.respondAccount = async () => reply(200, []);
+    response.resolve(reply(201, { account_details: { ...accountFixture(), balance: 20 } })); await settle();
+    equal(ui.get('accountTitle').textContent, 'Account Overview');
+    assert(ui.get('onboardingForm').classes.has('hidden'));
+    assert(ui.get('onboardingTarget').textContent.includes('€20.00'));
+    equal(ui.get('accountOverview').getAttribute('aria-busy'), 'false');
+});
+
+test('an unconfirmed account creation requires a read-only check and never automatically retries the POST', async () => {
+    const ui = boot(); await settle();
+    ui.env.respondAccount = async () => { throw new Error('Synthetic lost response'); };
+    ui.get('holderName').value = 'Synthetic Owner'; ui.get('initialDeposit').value = '20.00';
+    ui.get('onboardingForm').fire('submit'); await settle();
+    assert(ui.get('accountStatus').textContent.includes('creation was not confirmed'));
+    assert(ui.get('onboardingForm').classes.has('hidden'));
+    assert(!ui.get('retryAccount').hidden);
+    equal(ui.get('onboardingTarget').textContent, '');
+    ui.get('onboardingForm').fire('submit'); await settle();
+    equal(ui.env.readCalls.filter(call => call.method === 'POST').length, 1);
+    ui.env.respondAccount = async () => reply(404, {});
+    ui.get('retryAccount').fire('click'); await settle();
+    equal(ui.env.readCalls.filter(call => call.method === 'POST').length, 1);
+    assert(!ui.get('onboardingForm').classes.has('hidden'));
+    assert(!ui.get('btnOnboard').disabled);
+});
+
+test('a refresh failure during account opening preserves form inputs and pending transfer recovery', async () => {
+    const ui = boot(); await settle(); fill(ui);
+    ui.env.respond = async () => { throw new Error('Synthetic lost transfer response'); };
+    ui.get('transferForm').fire('submit'); await settle();
+    const saved = [...ui.env.storage.entries()], details = ui.get('transferDetails').textContent;
+    ui.get('holderName').value = 'Synthetic Owner'; ui.get('initialDeposit').value = '20.00';
+    ui.env.refresh = async () => { throw new Error('Synthetic transient refresh failure'); };
+    ui.get('onboardingForm').fire('submit'); await settle();
+    equal(ui.get('holderName').value, 'Synthetic Owner'); equal(ui.get('initialDeposit').value, '20.00');
+    equal([...ui.env.storage.entries()], saved); equal(ui.get('transferDetails').textContent, details);
+    assert(ui.get('btnOnboard').disabled);
+    assert(ui.get('accountStatus').textContent.includes('Requests are paused'));
+    equal(ui.env.readCalls.filter(call => call.method === 'POST').length, 0);
+    equal(ui.env.calls.length, 1);
+});
+
+test('a late account creation response after logout cannot restore the previous customer view', async () => {
+    const ui = boot(); await settle();
+    const response = deferred(); ui.env.respondAccount = () => response.promise;
+    ui.get('holderName').value = 'Synthetic Owner'; ui.get('initialDeposit').value = '20.00';
+    ui.get('onboardingForm').fire('submit'); await settle();
+    equal(ui.env.readCalls.filter(call => call.method === 'POST').length, 1);
+    ui.get('logoutBtn').fire('click'); await settle();
+    response.resolve(reply(201, { account_details: accountFixture() })); await settle();
+    equal(ui.get('onboardingTarget').textContent, '');
+    equal(ui.get('sourceAccount').value, '');
+    assert(ui.get('btnOnboard').disabled);
+    equal(ui.get('accountStatus').textContent, 'Sign in to view your account.');
+    equal(ui.intervals.size, 0);
+});
+
+for (const history of [[], null]) {
+    test(`an owned account with ${history === null ? 'null' : 'empty'} history uses the exact account empty message`, async () => {
+        const ui = bootWithAccount();
+        ui.env.respondAccount = async url => url.includes('/transactions') ? reply(200, history) : reply(200, accountFixture());
+        await settle();
+        equal(ui.get('historyTableBody').textContent, 'No transactions found for this account.');
+        assert(ui.get('historyTable').classes.has('is-empty'));
+        assert(ui.get('tableHelp').hidden);
+        ui.get('logoutBtn').fire('click'); await settle();
+        equal(ui.get('historyTableBody').textContent, 'Load or open an account to view its transactions.');
+    });
+}
+
+test('transaction history has distinct loading and error states and preserves data on later failures', async () => {
+    const ui = bootWithAccount(), response = deferred();
+    ui.env.respondAccount = async url => url.includes('/transactions') ? response.promise : reply(200, accountFixture());
+    await settle();
+    equal(ui.get('historyTableBody').textContent, 'Loading transactions…');
+    response.resolve(reply(503, {})); await settle();
+    assert(ui.get('historyTableBody').textContent.includes('history is unavailable'));
+    ui.env.respondAccount = async () => reply(200, [{ transaction_id: 'TX-SYNTHETIC', target_iban: 'SYNTHETIC-IBAN',
+        amount: 1234.5, status: 'PENDING', timestamp: '2026-03-08 14:07:23.123456' }]);
+    ui.tick(); await settle();
+    const table = ui.get('historyTableBody');
+    equal(table.children[0].children.map(cell => cell.textContent),
+        ['TX-SYNTHETIC', 'SYNTHETIC-IBAN', '€1,234.50', 'Pending', '08 Mar 2026, 14:07']);
+    equal(table.children[0].children[2].className, 'amount-cell');
+    assert(!ui.get('historyTable').classes.has('is-empty'));
+    assert(!ui.get('tableHelp').hidden);
+    const previous = table.textContent;
+    ui.env.respondAccount = async () => reply(503, {});
+    ui.tick(); await settle();
+    equal(table.textContent, previous);
+    ui.visibility('hidden');
+    assert(ui.get('historyUpdateNote').textContent.includes('paused'));
+    equal(ui.intervals.size, 0);
+    ui.visibility('visible'); await settle();
+    equal(ui.intervals.size, 1);
+});
+
+test('invalid monetary input shows an inline error without creating an intent or financial request', async () => {
+    const ui = boot(); await settle(); fill(ui, '12.345');
+    ui.get('transferForm').fire('submit'); await settle();
+    assert(!ui.get('transferError').hidden);
+    assert(ui.get('transferError').textContent.includes('two decimal places'));
+    equal(ui.env.uuidCount, 0); equal(ui.env.calls.length, 0);
+    ui.get('transferAmount').value = '12.30'; ui.get('transferAmount').fire('input');
+    assert(ui.get('transferError').hidden);
+    const response = deferred(); ui.env.respond = () => response.promise;
+    ui.get('transferForm').fire('submit'); await settle();
+    equal(ui.get('btnTransfer').textContent, 'Processing…');
+    equal(ui.get('transferForm').getAttribute('aria-busy'), 'true');
+    response.resolve(commit()); await settle();
+    equal(ui.get('btnTransfer').textContent, 'Send transfer');
+    equal(ui.get('transferForm').getAttribute('aria-busy'), 'false');
+    equal(ui.env.calls.length, 1);
+});
+
+test('native form validation exposes accessible inline feedback and clears it on editing', async () => {
+    const ui = boot(); await settle();
+    const field = ui.get('targetAccount');
+    field.validationMessage = 'Please fill out this field.';
+    ui.get('transferForm').fire('invalid', { target: field });
+    equal(field.getAttribute('aria-invalid'), 'true');
+    equal(ui.get('transferError').textContent, 'Please fill out this field.');
+    field.fire('input');
+    equal(field.getAttribute('aria-invalid'), null);
+    assert(ui.get('transferError').hidden);
+    equal(ui.env.calls.length, 0);
+    for (const id of ['holderName', 'initialDeposit', 'sourceAccount', 'targetAccount', 'transferAmount']) {
+        assert(ui.html.includes(`for="${id}"`));
+    }
+    assert(ui.html.includes('class="skip-link"'));
+    assert(!ui.html.includes('fonts.googleapis.com'));
 });
 
 let failed = 0;
