@@ -22,7 +22,8 @@ class JwtConfigurationTest {
         }
         String issuer = "https://keycloak-test.example.invalid/realms/intermesh-bank";
         SmallRyeConfig config = new SmallRyeConfigBuilder()
-                .withSources(new EnvConfigSource(Map.of("MP_JWT_VERIFY_ISSUER", issuer), 300),
+                .withSources(new EnvConfigSource(Map.of("MP_JWT_VERIFY_ISSUER", issuer,
+                                "SMALLRYE_JWT_CLIENT_TLS_CERTIFICATE_PATH", "/etc/keycloak-trust/router-ca.crt"), 300),
                         new PropertiesConfigSource(properties, "application.properties", 100))
                 .addDefaultInterceptors()
                 .build();
@@ -30,5 +31,8 @@ class JwtConfigurationTest {
         assertEquals(issuer, config.getValue("mp.jwt.verify.issuer", String.class));
         assertEquals(issuer + "/protocol/openid-connect/certs",
                 config.getValue("mp.jwt.verify.publickey.location", String.class));
+        assertEquals("/etc/keycloak-trust/router-ca.crt",
+                config.getValue("smallrye.jwt.client.tls.certificate.path", String.class));
+        assertEquals(true, config.getValue("quarkus.ssl.native", Boolean.class));
     }
 }

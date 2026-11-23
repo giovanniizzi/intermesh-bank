@@ -5,6 +5,13 @@ import { TransferRequests, describeIntent, userScope } from './transfer-requests
 const GATEWAY_URL = window.location.origin; 
 let activeAccountID = null;
 let pollingInterval = null;
+let pollingVisibilityHandler = null;
+let historyRequest = null;
+let tokenRefresh = null;
+let authenticationGeneration = 0;
+let authenticationBlocked = false;
+let sessionEnded = false;
+const AUTHENTICATION_PAUSED = 'Authentication is unavailable. Requests are paused; reload to sign in again. Saved transfer requests are retained.';
 
 // HTML element references (declared here, initialized at startup)
 let sourceAccountInput, onboardingTarget, historyTableBody, toast, logoutBtn;
@@ -17,8 +24,12 @@ const keycloak = new Keycloak({
     clientId: 'intermesh-frontend'
 });
 
-keycloak.onAuthLogout = suspendTransferView;
+keycloak.onAuthLogout = endAuthenticationSession;
+keycloak.onAuthRefreshError = () => {
+    if (!sessionEnded) pauseAuthenticatedRequests();
+};
 keycloak.onAuthRefreshSuccess = () => {
+    if (sessionEnded) return;
     if (sourceAccountInput && (!transferRequests || !transferRequests.isCurrent())) {
         suspendTransferView();
         initializeTransfers();
@@ -85,16 +96,14 @@ function populateUserProfile() {
 
 // --- ACCOUNT DISCOVERY ON PAGE RELOAD ---
 async function checkExistingAccount(userID) {
-    const scope = authenticatedScope();
+    const context = requestContext();
     try {
         console.log("[Account Lookup] Checking for an existing account.");
-        const response = await fetch(`${GATEWAY_URL}/api/v1/accounts/${userID}`, {
-            headers: { 'Authorization': `Bearer ${keycloak.token}` }
-        });
+        const response = await authenticatedFetch(`${GATEWAY_URL}/api/v1/accounts/${userID}`, {}, context);
         
         if (response.status === 200) {
             const accountData = await response.json();
-            if (!scope || scope !== authenticatedScope()) return;
+            if (!isCurrentRequest(context)) return;
             
             // Update the internal state variable
             activeAccountID = accountData.account_id;
@@ -119,7 +128,7 @@ async function checkExistingAccount(userID) {
             // Start polling to display Ledger transactions
             renderTransferState();
             startLedgerPolling(activeAccountID);
-        } else {
+        } else if (response.status === 404) {
             console.log("[Channel Hub Context] No pre-existing account discovered. Fresh onboarding required.");
         }
     } catch {
@@ -128,9 +137,11 @@ async function checkExistingAccount(userID) {
 }
 
 function startLedgerPolling(accountId) {
-    const scope = authenticatedScope();
+    stopLedgerPolling();
+    if (authenticationBlocked || sessionEnded) return;
+    const context = requestContext();
     const runPolling = () => {
-        if (!scope || scope !== authenticatedScope() || accountId !== activeAccountID) return;
+        if (authenticationBlocked || !isCurrentRequest(context) || accountId !== activeAccountID) return;
         if (pollingInterval) clearInterval(pollingInterval);
         
         fetchLedgerHistory(accountId);
@@ -147,7 +158,7 @@ function startLedgerPolling(accountId) {
         }
     };
 
-    const handleVisibilityChange = () => {
+    pollingVisibilityHandler = () => {
         if (document.visibilityState === 'visible') {
             runPolling();
         } else {
@@ -155,26 +166,34 @@ function startLedgerPolling(accountId) {
         }
     };
 
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', pollingVisibilityHandler);
 
     if (document.visibilityState === 'visible') {
         runPolling();
     }
 }
 
+function stopLedgerPolling() {
+    if (pollingInterval) clearInterval(pollingInterval);
+    pollingInterval = null;
+    if (pollingVisibilityHandler) document.removeEventListener('visibilitychange', pollingVisibilityHandler);
+    pollingVisibilityHandler = null;
+}
+
 async function fetchLedgerHistory(accountId) {
-    const scope = authenticatedScope();
+    const context = requestContext();
+    if (authenticationBlocked || !isCurrentRequest(context) || accountId !== activeAccountID) return;
+    if (historyRequest?.generation === context.generation) return;
+    historyRequest = context;
     try {
-        const response = await fetch(`${GATEWAY_URL}/api/v1/account/${accountId}/transactions`, {
-            headers: { 'Authorization': `Bearer ${keycloak.token}` }
-        });
+        const response = await authenticatedFetch(`${GATEWAY_URL}/api/v1/account/${accountId}/transactions`, {}, context);
         if (!response.ok) return;
 
         const transactions = await response.json();
-        if (scope && scope === authenticatedScope()) renderHistoryTable(transactions);
-    } catch (e) {}
+        if (isCurrentRequest(context) && accountId === activeAccountID) renderHistoryTable(transactions);
+    } catch {} finally {
+        if (historyRequest === context) historyRequest = null;
+    }
 }
 
 function setupEventListeners() {
@@ -185,9 +204,7 @@ function setupEventListeners() {
         logoutBtn.addEventListener('click', () => {
             console.log("[Keycloak Perimeter] Terminating user session link...");
             
-            // Clear active polling timers first to avoid memory leaks
-            if (pollingInterval) clearInterval(pollingInterval);
-            suspendTransferView();
+            endAuthenticationSession();
             
             // End the Keycloak session and redirect
             // the browser to the initial login page
@@ -200,25 +217,25 @@ function setupEventListeners() {
     // Pipeline Onboarding
     onboardingForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const scope = authenticatedScope();
+        if (authenticationBlocked || sessionEnded) return;
+        const context = requestContext();
         const payload = {
             holder_name: document.getElementById('holderName').value,
             initial_deposit: parseFloat(document.getElementById('initialDeposit').value)
         };
         try {
-            const response = await fetch(`${GATEWAY_URL}/api/v1/accounts`, {
+            const response = await authenticatedFetch(`${GATEWAY_URL}/api/v1/accounts`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${keycloak.token}`
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(payload)
-            });
+            }, context);
 
             if (!response.ok) throw new Error('Onboarding execution rejected by Mesh guards.');
             
             const result = await response.json();
-            if (!scope || scope !== authenticatedScope()) return;
+            if (!isCurrentRequest(context)) return;
             const accountDetails = result.account_details;
             activeAccountID = accountDetails.account_id;
 
@@ -233,7 +250,7 @@ function setupEventListeners() {
             showToast('Account successfully provisioned in Core Ledger!', 'success');
             startLedgerPolling(activeAccountID);
         } catch (error) {
-            showToast(error.message, 'error');
+            if (isCurrentRequest(context)) showToast(authenticationBlocked ? AUTHENTICATION_PAUSED : error.message, 'error');
         }
     });
 
@@ -284,13 +301,75 @@ function authenticatedScope() {
     try { return keycloak.authenticated ? userScope(keycloak.tokenParsed) : null; } catch { return null; }
 }
 
+function requestContext() {
+    return { scope: authenticatedScope(), generation: authenticationGeneration };
+}
+
+function isCurrentRequest(context) {
+    return !sessionEnded && context.scope && context.scope === authenticatedScope()
+        && context.generation === authenticationGeneration;
+}
+
+function pauseAuthenticatedRequests() {
+    if (authenticationBlocked) return;
+    authenticationBlocked = true;
+    stopLedgerPolling();
+    if (sourceAccountInput) {
+        renderTransferState();
+        showToast(AUTHENTICATION_PAUSED, 'error');
+    }
+}
+
+function endAuthenticationSession() {
+    if (sessionEnded) return;
+    sessionEnded = true;
+    authenticationBlocked = true;
+    suspendTransferView();
+}
+
+async function getAccessToken(context) {
+    if (authenticationBlocked || !isCurrentRequest(context)) throw new Error(AUTHENTICATION_PAUSED);
+    try {
+        // Share one refresh across polling, onboarding and transfer requests.
+        if (!tokenRefresh) tokenRefresh = keycloak.updateToken(30);
+        const pending = tokenRefresh;
+        try { await pending; }
+        finally { if (tokenRefresh === pending) tokenRefresh = null; }
+    } catch {
+        if (isCurrentRequest(context)) pauseAuthenticatedRequests();
+        throw new Error(AUTHENTICATION_PAUSED);
+    }
+    // Logout and identity changes invalidate even a successfully refreshed token.
+    if (authenticationBlocked || !isCurrentRequest(context)) throw new Error(AUTHENTICATION_PAUSED);
+    if (typeof keycloak.token !== 'string' || !keycloak.token.trim()) {
+        pauseAuthenticatedRequests();
+        throw new Error(AUTHENTICATION_PAUSED);
+    }
+    return keycloak.token;
+}
+
+async function sendAuthenticatedRequest(url, options, context) {
+    if (authenticationBlocked || !isCurrentRequest(context)) throw new Error(AUTHENTICATION_PAUSED);
+    const response = await fetch(url, options);
+    // Never retry an API request, including a financial POST, after a 401.
+    if (response.status === 401 && isCurrentRequest(context)) pauseAuthenticatedRequests();
+    return response;
+}
+
+async function authenticatedFetch(url, options, context) {
+    const token = await getAccessToken(context);
+    return sendAuthenticatedRequest(url, { ...options,
+        headers: { ...options.headers, Authorization: `Bearer ${token}` } }, context);
+}
+
 function initializeTransfers() {
     transferLoadError = false;
+    const context = requestContext();
     try {
         transferRequests = new TransferRequests({ storage: window.sessionStorage, crypto: window.crypto,
-            fetch: (url, options) => fetch(url, options),
+            fetch: (url, options) => sendAuthenticatedRequest(url, options, context),
             getClaims: () => keycloak.authenticated ? keycloak.tokenParsed : null,
-            getToken: async () => { await keycloak.updateToken(30); return keycloak.token; },
+            getToken: () => getAccessToken(context),
             onChange: renderTransferState });
     } catch {
         transferRequests = null;
@@ -300,12 +379,12 @@ function initializeTransfers() {
 }
 
 function suspendTransferView() {
+    authenticationGeneration++;
     transferRequests?.detach();
     transferRequests = null;
     transferLoadError = false;
     activeAccountID = null;
-    if (pollingInterval) clearInterval(pollingInterval);
-    pollingInterval = null;
+    stopLedgerPolling();
     if (!sourceAccountInput) return;
     sourceAccountInput.value = '';
     document.getElementById('targetAccount').value = '';
@@ -326,6 +405,7 @@ function renderTransferState() {
     const requests = transferRequests?.isCurrent() ? transferRequests : null;
     const active = requests?.active;
     const busy = requests?.busy || false;
+    const unavailable = busy || authenticationBlocked;
     const saved = document.getElementById('savedTransfer');
     const recovery = document.getElementById('transferRecovery');
     const status = document.getElementById('transferStatus');
@@ -342,8 +422,8 @@ function renderTransferState() {
         saved.append(option);
     }
     saved.value = active?.transfer_request_id || '';
-    saved.disabled = busy || !requests;
-    recovery.hidden = !(requests?.intents.length || transferLoadError);
+    saved.disabled = unavailable || !requests;
+    recovery.hidden = !(requests?.intents.length || transferLoadError || authenticationBlocked);
     details.textContent = active ? `Request: ${active.transfer_request_id}\nSource: ${active.source_account}\nDestination: ${active.target_account}\nAmount: €${active.amount}\nDuplicate approval: ${active.allowDuplicatePendingTransfer ? 'yes' : 'no'}`
         + (active.transaction_id ? `\nTransaction: ${active.transaction_id}` : '')
         + (active.confirmation_request_id ? `\nSeparate duplicate request: ${active.confirmation_request_id}` : '') : '';
@@ -351,34 +431,35 @@ function renderTransferState() {
         ? 'Saved transfer data is unavailable. Nothing will be sent. Preserve this tab’s sessionStorage for recovery.'
         : active ? (busy ? 'Contacting Orchestrator. The saved UUID and transfer values are unchanged. ' : '') + describeIntent(active)
         : 'Saved requests are retained. Starting another transfer creates a separate intent with a new UUID.';
+    if (authenticationBlocked && !sessionEnded) status.textContent = AUTHENTICATION_PAUSED + '\n' + status.textContent;
     for (const id of ['sourceAccount', 'targetAccount', 'transferAmount']) {
-        document.getElementById(id).readOnly = Boolean(active) || busy || !requests;
+        document.getElementById(id).readOnly = Boolean(active) || unavailable || !requests;
     }
     if (active) {
         sourceAccountInput.value = active.source_account;
         document.getElementById('targetAccount').value = active.target_account;
         document.getElementById('transferAmount').value = active.amount;
     }
-    document.getElementById('btnTransfer').disabled = !requests || busy || Boolean(active) || requests.storageFailed;
-    document.getElementById('checkTransfer').disabled = !active || busy;
-    document.getElementById('replayTransfer').disabled = !active || busy || requests?.storageFailed
+    document.getElementById('btnTransfer').disabled = !requests || unavailable || Boolean(active) || requests.storageFailed;
+    document.getElementById('checkTransfer').disabled = !active || unavailable;
+    document.getElementById('replayTransfer').disabled = !active || unavailable || requests?.storageFailed
         || ['APPROVED', 'FAILED', 'REJECTED'].includes(active?.outcome);
-    document.getElementById('newTransfer').disabled = !requests || busy || requests.storageFailed;
+    document.getElementById('newTransfer').disabled = !requests || unavailable || requests.storageFailed;
     const duplicate = document.getElementById('confirmDuplicate');
     duplicate.hidden = !(active?.outcome === 'REJECTED' && active.rejection_code === 'DUPLICATE_APPROVAL_REQUIRED'
         && !active.allowDuplicatePendingTransfer && !active.confirmation_request_id);
-    duplicate.disabled = busy || !requests || requests.storageFailed;
+    duplicate.disabled = unavailable || !requests || requests.storageFailed;
 }
 
 async function runTransferAction(action) {
     const requests = transferRequests;
-    if (!requests || !requests.isCurrent() || requests.busy) return;
+    if (authenticationBlocked || !requests || !requests.isCurrent() || requests.busy) return;
     try { await action(requests); }
     catch (error) { if (requests.isCurrent()) showToast(error.message, 'error'); }
     finally {
         if (requests === transferRequests && requests.isCurrent()) {
             renderTransferState();
-            if (activeAccountID) fetchLedgerHistory(activeAccountID);
+            if (!authenticationBlocked && activeAccountID) fetchLedgerHistory(activeAccountID);
         }
     }
 }

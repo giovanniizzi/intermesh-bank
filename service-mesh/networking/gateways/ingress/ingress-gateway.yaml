@@ -20,4 +20,5 @@ spec:
       number: 443
       protocol: HTTPS
     tls:
-      mode: OPTIONAL_MUTUAL
+      mode: SIMPLE
+      credentialName: intermesh-ingress-tls

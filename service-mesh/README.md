@@ -37,7 +37,12 @@ connectivity. See the [topology](../docs/deployment-architecture.md#multicluster
 
 The [Orchestrator ServiceEntry](networking/service-entries/internal/intermesh-orchestrator-se.yaml)
 declares the internal service identity and the Orchestrator and East-West Gateway
-SPIFFE subject alternative names. External ServiceEntries register
+SPIFFE subject alternative names. Both network-specific Orchestrator
+DestinationRules explicitly require `ISTIO_MUTUAL` and accept either of these
+exact identities: the local Orchestrator Sidecar or the remote L7 gateway.
+Mesh CA verification remains enabled, and Istio generates the upstream SNI.
+The existing cookie hash settings select endpoints independently of this TLS
+identity check. External ServiceEntries register
 [PostgreSQL](networking/service-entries/external/serviceentry-db.yaml) on TCP/5432 and
 [Keycloak](networking/service-entries/external/serviceentry-keycloak.yaml) on HTTPS/443.
 The PostgreSQL ServiceEntry does not establish an egress allowlist.

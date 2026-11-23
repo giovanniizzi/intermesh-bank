@@ -6,8 +6,14 @@ metadata:
 spec:
   host: intermesh-orchestrator.intermesh-backend.svc.cluster.local
   trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+      subjectAltNames:
+        - spiffe://cluster.local/ns/intermesh-backend/sa/intermesh-orchestrator-sa
+        - spiffe://cluster.local/ns/istio-east-west/sa/istio-eastwestgateway-service-account
     loadBalancer:
       consistentHash:
         httpCookie:
           name: network1.session
+          path: /
           ttl: 0s
