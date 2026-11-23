@@ -2,17 +2,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OUTCOMES = new Set(['UNRESOLVED', 'PENDING', 'APPROVED', 'FAILED', 'REJECTED']);
 export const REJECTION_MESSAGES = Object.freeze({
     DUPLICATE_APPROVAL_REQUIRED: 'An identical transfer is already pending. A separate duplicate requires explicit confirmation.',
-    DUPLICATE_APPROVAL_NOT_ELIGIBLE: 'Duplicate approval is not eligible for this transfer. Check the pending transfers before starting another intent.',
-    DUPLICATE_EXCEPTION_USED: 'The duplicate exception for this pending cycle has already been used, even if the approved duplicate has finished.',
-    ACTIVE_CYCLE_BLOCKED: 'An active transfer cycle blocks another identical transfer.',
-    ACTIVE_CYCLE_CONFLICT: 'The active transfer cycle conflicts with this request.',
+    DUPLICATE_APPROVAL_NOT_ELIGIBLE: 'Duplicate approval is not available for this transfer. Check pending transfers before starting another request.',
+    DUPLICATE_EXCEPTION_USED: 'Duplicate approval has already been used for these pending transfers, even if the approved duplicate has finished.',
+    ACTIVE_CYCLE_BLOCKED: 'Another identical transfer is still pending. Check its status before starting another.',
+    ACTIVE_CYCLE_CONFLICT: 'This request conflicts with another pending transfer. Check its status before trying again.',
     INSUFFICIENT_FUNDS: 'The transfer was rejected because available funds were insufficient.'
 });
 const ERROR_MESSAGES = Object.freeze({
-    REQUEST_INTENT_CONFLICT: 'This UUID is registered with different transfer parameters. Keep the original intent and check its status.',
-    TRANSFER_REQUEST_NOT_FOUND: 'Not found or inaccessible at this snapshot. An earlier in-flight POST may still complete; keep this UUID.',
-    COMMIT_OUTCOME_UNKNOWN: 'The admission outcome is unknown. Check status using this UUID.',
-    TRANSFER_PERSISTENCE_UNAVAILABLE: 'Transfer persistence is unavailable. The financial outcome is not confirmed.'
+    REQUEST_INTENT_CONFLICT: 'This transfer reference is associated with different details. Keep the original request and check its status.',
+    TRANSFER_REQUEST_NOT_FOUND: 'This transfer could not be found or accessed. An earlier request may still complete; keep the saved request.',
+    COMMIT_OUTCOME_UNKNOWN: 'The transfer outcome is unknown. Check the status of this saved request.',
+    TRANSFER_PERSISTENCE_UNAVAILABLE: 'The transfer service is unavailable. The financial outcome is not confirmed.'
 });
 
 export function userScope(claims) {
@@ -108,15 +108,15 @@ function resultFor(status, body, intent, recovery) {
 export function describeIntent(intent) {
     const outcome = {
         UNRESOLVED: 'Financial outcome is not confirmed. Check status before replacing this request.',
-        PENDING: 'Admitted and PENDING. This transfer is not completed.',
-        APPROVED: 'Ledger reported APPROVED.',
-        FAILED: 'Ledger reported FAILED.',
-        REJECTED: 'Admission rejected; this request has no financial transaction. '
+        PENDING: 'Transfer is PENDING. This transfer is not completed.',
+        APPROVED: 'Reported status: APPROVED.',
+        FAILED: 'Reported status: FAILED.',
+        REJECTED: 'Transfer request rejected; no financial transaction was created for this request. '
             + (REJECTION_MESSAGES[intent.rejection_code] || '')
     }[intent.outcome];
     const notice = ERROR_MESSAGES[intent.notice] || ({
-        UNCONFIRMED: 'The latest response was unavailable or unusable. Keep this UUID and check status.',
-        AUTH_REQUIRED: 'Authentication or session authorization failed. Check status again as the original user; reauthenticate if needed.',
+        UNCONFIRMED: 'The latest response could not be confirmed. Keep this saved request and check its status.',
+        AUTH_REQUIRED: 'Sign in again as the original account holder to check this transfer.',
         STORAGE_ERROR: 'The latest result could not be saved. Keep this tab open and check status.'
     }[intent.notice] || '');
     return outcome + (notice ? ' ' + notice : '');
@@ -140,10 +140,10 @@ export class TransferRequests {
         if (saved !== null) {
             const data = JSON.parse(saved);
             if (data?.version !== 1 || !Array.isArray(data.intents)
-                    || !(data.activeId === null || typeof data.activeId === 'string')) throw new Error('Saved transfer data is unreadable; preserve sessionStorage for recovery.');
+                    || !(data.activeId === null || typeof data.activeId === 'string')) throw new Error('Saved transfer information is unreadable. Keep this tab open for recovery.');
             const ids = new Set();
             for (const intent of data.intents) {
-                if (!this.validSavedIntent(intent) || ids.has(intent.transfer_request_id)) throw new Error('Saved transfer data is unreadable; preserve sessionStorage for recovery.');
+                if (!this.validSavedIntent(intent) || ids.has(intent.transfer_request_id)) throw new Error('Saved transfer information is unreadable. Keep this tab open for recovery.');
                 ids.add(intent.transfer_request_id);
             }
             if (data.activeId !== null && !ids.has(data.activeId)) throw new Error('Saved transfer selection is invalid.');
@@ -184,7 +184,7 @@ export class TransferRequests {
     save() {
         this.assertCurrent();
         try { this.storage.setItem(this.key, JSON.stringify(this.data)); }
-        catch { this.storageFailed = true; throw new Error('Transfer data could not be saved. No further POST will be sent from this view.'); }
+        catch { this.storageFailed = true; throw new Error('Transfer information could not be saved. No further payments will be submitted from this page.'); }
     }
     select(id) {
         this.assertCurrent();
@@ -211,9 +211,9 @@ export class TransferRequests {
         if (!accountText(values.source_account, 50, true) || !accountText(values.target_account, 34)
                 || typeof approval !== 'boolean') throw new Error('Enter a valid source account and destination.');
         const amount = exactAmount(values.amount);
-        if (typeof this.crypto?.randomUUID !== 'function') throw new Error('Secure UUID generation requires a supported browser and HTTPS.');
+        if (typeof this.crypto?.randomUUID !== 'function') throw new Error('Creating a secure transfer reference requires a supported browser and HTTPS.');
         const id = this.crypto.randomUUID();
-        if (!UUID.test(id) || this.data.intents.some(intent => intent.transfer_request_id === id)) throw new Error('Could not create a unique request UUID.');
+        if (!UUID.test(id) || this.data.intents.some(intent => intent.transfer_request_id === id)) throw new Error('Could not create a unique transfer reference.');
         return { transfer_request_id: id, source_account: values.source_account,
             target_account: values.target_account, amount, allowDuplicatePendingTransfer: approval,
             outcome: 'UNRESOLVED', notice: '', transaction_id: null, rejection_code: null,
@@ -247,7 +247,7 @@ export class TransferRequests {
         const intent = this.data.intents.find(item => item.transfer_request_id === id);
         if (!intent) throw new Error('Unknown transfer request.');
         if (!recovery && (this.storageFailed || ['APPROVED', 'FAILED', 'REJECTED'].includes(intent.outcome))) {
-            throw new Error('Use status recovery for this intent; a new transfer requires a new UUID.');
+            throw new Error('Check the status of this saved request. Start a new transfer only if you intend to request another payment.');
         }
         this.busy = true;
         this.notify();

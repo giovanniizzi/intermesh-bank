@@ -70,6 +70,45 @@ func TestOrchestratorLedgerPostgres(t *testing.T) {
 		t.Skip("run tests/run-fin03-integration.sh to enable the real Orchestrator integration")
 	}
 	s := startStack(t, jar)
+	t.Run("transaction_history_contract", func(t *testing.T) {
+		s.reset(t, "1000.00")
+		history := func() []byte {
+			t.Helper()
+			r, err := http.NewRequest(http.MethodGet, s.url+"/api/v1/account/SOURCE/transactions", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set("Authorization", "Bearer "+s.token(t, "alice"))
+			response, err := s.client.Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "application/json") {
+				t.Fatalf("history response: status=%d type=%q", response.StatusCode, response.Header.Get("Content-Type"))
+			}
+			return body
+		}
+		if body := history(); string(body) != "[]" {
+			t.Fatalf("empty history must be a JSON array, got %q", body)
+		}
+		id := s.id()
+		s.plan(t, 200, false)
+		expect(t, s.post(s.intent(id, "12.30", false), s.token(t, "alice")), 200, "", "")
+		tx := s.transaction(t, id, "APPROVED", "12.30", "", false)
+		var rows []map[string]any
+		if err := json.Unmarshal(history(), &rows); err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || len(rows[0]) != 5 || rows[0]["transaction_id"] != tx || rows[0]["target_iban"] != "TEST-DESTINATION" || rows[0]["amount"] != 12.30 || rows[0]["status"] != "APPROVED" || rows[0]["timestamp"] == "" {
+			t.Fatalf("nonempty history contract changed: %v", rows)
+		}
+		s.balances(t, "987.70", "0.00")
+	})
 	t.Run("ordinary_replay_recovery_identity", func(t *testing.T) { s.ordinary(t) })
 	for _, first := range []string{"duplicate", "ordinary"} {
 		t.Run(first+"_finishes_first", func(t *testing.T) { s.cycle(t, first) })

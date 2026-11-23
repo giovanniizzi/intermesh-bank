@@ -345,7 +345,7 @@ test('a failed status check preserves a previously reported financial outcome', 
     await env.client.recover(intent.transfer_request_id);
     equal(env.client.active.outcome, 'APPROVED');
     equal(env.open().active.outcome, 'APPROVED');
-    assert(describeIntent(env.client.active).includes('latest response was unavailable'));
+    assert(describeIntent(env.client.active).includes('latest response could not be confirmed'));
     equal(env.calls.map(call => call.method), ['POST', 'GET']);
 });
 
@@ -362,6 +362,22 @@ test('failure to persist a result retains the saved UUID and blocks further POST
     const refreshed = env.open();
     equal(refreshed.active.transfer_request_id, intent.transfer_request_id);
     equal(refreshed.active.outcome, 'UNRESOLVED');
+});
+
+test('customer recovery messages preserve financial uncertainty without infrastructure terminology', () => {
+    const notices = ['', 'UNCONFIRMED', 'AUTH_REQUIRED', 'STORAGE_ERROR', 'REQUEST_INTENT_CONFLICT',
+        'TRANSFER_REQUEST_NOT_FOUND', 'COMMIT_OUTCOME_UNKNOWN', 'TRANSFER_PERSISTENCE_UNAVAILABLE'];
+    for (const outcome of ['UNRESOLVED', 'PENDING', 'APPROVED', 'FAILED', 'REJECTED']) {
+        for (const notice of notices) {
+            const message = describeIntent({ outcome, notice, rejection_code: 'DUPLICATE_APPROVAL_REQUIRED' });
+            assert(!/\b(?:UUID|POST|GET|Ledger|Orchestrator|sessionStorage|network1|network2)\b|browser storage|service mesh/i.test(message));
+            if (outcome === 'UNRESOLVED') assert(message.includes('Financial outcome is not confirmed'));
+            if (outcome === 'PENDING') assert(message.includes('not completed'));
+            if (outcome === 'APPROVED') assert(message.includes('Reported status: APPROVED'));
+            if (outcome === 'FAILED') assert(message.includes('Reported status: FAILED'));
+            assert(!/funds (?:restored|unlocked)|payment completed/i.test(message));
+        }
+    }
 });
 
 let failed = 0;

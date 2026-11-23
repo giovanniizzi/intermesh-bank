@@ -42,16 +42,22 @@ class Element {
     }
     getAttribute(name) { return this.attributes.get(name) ?? null; }
     removeAttribute(name) { this.attributes.delete(name); }
+    focus() { this.onFocus?.(); }
+    showModal() { this.open = true; this.onShowModal?.(); }
+    close() { if (this.open) { this.open = false; this.fire('close'); } }
+    cancel() { if (this.open) { this.fire('cancel'); this.close(); } }
     addEventListener(type, listener) { this.listeners[type] = listener; }
     fire(type, details = {}) { if (!this.disabled || type === 'submit') return this.listeners[type]?.({ target: this, preventDefault() {}, ...details }); }
 }
-function boot(shared = null) {
+function boot(shared = null, initialHash = '') {
     const env = shared || { storage: new Map(), calls: [], uuidCount: 0, confirmations: [], confirm: false,
         respond: async () => commit(), claims: { iss: 'https://keycloak.example.invalid/realms/intermesh-bank',
             sub: 'synthetic-a', preferred_username: 'synthetic-owner' } };
     env.readCalls ??= [];
     env.refreshCalls ??= [];
     env.loginCalls ??= 0;
+    env.initCalls ??= 0;
+    env.clipboardWrites ??= [];
     const intervals = new Map();
     const visibilityListeners = new Set();
     let intervalID = 0;
@@ -66,6 +72,7 @@ function boot(shared = null) {
     }
     for (const selector of ['.user-name', '.user-role', '.avatar']) elements.set(selector, new Element());
     const document = {
+        activeElement: null,
         getElementById(id) { assert(elements.has(id), 'Missing HTML element ' + id); return elements.get(id); },
         querySelector: selector => elements.get(selector), createElement: tag => new Element(tag),
         querySelectorAll: selector => [...elements.values()].filter(element => selector === '.nav-item' && element.classes.has('nav-item')),
@@ -74,15 +81,32 @@ function boot(shared = null) {
         addEventListener(type, listener) { if (type === 'visibilitychange') visibilityListeners.add(listener); },
         removeEventListener(type, listener) { if (type === 'visibilitychange') visibilityListeners.delete(listener); }
     };
+    for (const element of elements.values()) element.onFocus = () => { document.activeElement = element; };
+    elements.get('transferHelp').onShowModal = () => elements.get('closeTransferHelp').focus();
     const windowListeners = new Map();
-    const window = { location: { origin: 'https://bank-network1.example.invalid', hash: '', reload() {} },
+    const window = { location: { origin: 'https://bank-network1.example.invalid', hash: initialHash, reload() {} },
         addEventListener: (event, callback) => windowListeners.set(event, callback),
         crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++env.uuidCount).padStart(12, '0')}` },
         sessionStorage: { getItem: key => env.storage.get(key) ?? null, setItem: (key, value) => env.storage.set(key, value) },
-        confirm: text => { env.confirmations.push(text); return env.confirm; } };
+        confirm: text => { env.confirmations.push(text); return env.confirm; }, scrollTo() {} };
+    const entries = [window.location.hash];
+    let entry = 0;
+    const traverse = offset => {
+        const next = entry + offset;
+        if (next < 0 || next >= entries.length) return;
+        entry = next; window.location.hash = entries[entry]; windowListeners.get('hashchange')?.();
+    };
+    window.history = { back: () => traverse(-1), forward: () => traverse(1) };
+    const navigate = hash => {
+        entries.splice(++entry); entries.push(hash);
+        window.location.hash = hash; windowListeners.get('hashchange')?.();
+    };
+    const navigator = { clipboard: { writeText: async text => {
+        env.clipboardWrites.push(text); if (env.copy) await env.copy();
+    } } };
     class Keycloak {
         constructor() { this.authenticated = true; this.tokenParsed = env.claims; this.token = 'synthetic-test-token'; env.keycloak = this; }
-        async init(options) { equal(options.pkceMethod, 'S256'); return true; }
+        async init(options) { env.initCalls++; equal(options.pkceMethod, 'S256'); return true; }
         async updateToken(minValidity) {
             env.refreshCalls.push(minValidity);
             return env.refresh ? env.refresh(this) : false;
@@ -104,13 +128,13 @@ function boot(shared = null) {
     };
     const source = '"use strict";\n' + readFile('src/intermesh-ui/src/js/app.js').replace(/^import .*;$/gm, '');
     const run = new Function('Keycloak', 'TransferRequests', 'describeIntent', 'userScope', 'window', 'document',
-        'fetch', 'console', 'alert', 'setInterval', 'clearInterval', 'setTimeout', source);
-    run(Keycloak, TransferRequests, describeIntent, userScope, window, document, fetch,
+        'navigator', 'fetch', 'console', 'alert', 'setInterval', 'clearInterval', 'setTimeout', source);
+    run(Keycloak, TransferRequests, describeIntent, userScope, window, document, navigator, fetch,
         { log() {}, error() {} }, message => { throw new Error(message); },
         callback => { intervals.set(++intervalID, callback); return intervalID; },
         id => intervals.delete(id), () => {});
-    return { env, elements, get: id => elements.get(id), window, html, intervals, visibilityListeners,
-        navigate(hash) { window.location.hash = hash; windowListeners.get('hashchange')?.(); },
+    return { env, elements, get: id => elements.get(id), document, window, navigator, html, intervals, visibilityListeners,
+        navigate,
         tick() { for (const callback of [...intervals.values()]) callback(); },
         visibility(state) {
             document.visibilityState = state;
@@ -640,7 +664,7 @@ test('refresh failure before a financial POST retains its UUID and never sends o
 
 test('dashboard headings, navigation targets and contextual recovery help are meaningful', async () => {
     const ui = boot(); await settle();
-    assert(ui.html.includes('<h1>My Dashboard</h1>'));
+    assert(/<h1[^>]*>My Dashboard<\/h1>/.test(ui.html));
     assert(ui.html.includes('>New Transfer</h2>'));
     assert(ui.html.includes('>Transaction History</h2>'));
     assert(!ui.html.includes('href="#"'));
@@ -649,13 +673,14 @@ test('dashboard headings, navigation targets and contextual recovery help are me
         equal(ui.get(linkID).getAttribute('href'), '#' + sectionID);
         assert(ui.get(sectionID));
         ui.navigate('#' + sectionID);
-        equal(ui.get(linkID).getAttribute('aria-current'), 'location');
-        equal([...ui.elements.values()].filter(element => element.getAttribute('aria-current') === 'location').length, 1);
+        equal(ui.get(linkID).getAttribute('aria-current'), 'page');
+        equal([...ui.elements.values()].filter(element => element.getAttribute('aria-current') === 'page').length, 1);
         assert(ui.get(linkID).classes.has('active'));
     }
     ui.navigate('#unknown');
-    equal(ui.get('dashboardLink').getAttribute('aria-current'), 'location');
-    assert(/<details class="context-help">[\s\S]*network1 and network2[\s\S]*<\/details>/.test(ui.html));
+    equal(ui.get('dashboardLink').getAttribute('aria-current'), 'page');
+    assert(!ui.html.includes('About transfers and recovery'));
+    equal(ui.get('transferHelpButton').getAttribute('aria-controls'), 'transferHelp');
     assert(/<details class="request-details">[\s\S]*id="transferDetails"/.test(ui.html));
 });
 
@@ -766,6 +791,7 @@ test('a refresh failure during account opening preserves form inputs and pending
     const ui = boot(); await settle(); fill(ui);
     ui.env.respond = async () => { throw new Error('Synthetic lost transfer response'); };
     ui.get('transferForm').fire('submit'); await settle();
+    ui.navigate('#transfers');
     const saved = [...ui.env.storage.entries()], details = ui.get('transferDetails').textContent;
     ui.get('holderName').value = 'Synthetic Owner'; ui.get('initialDeposit').value = '20.00';
     ui.env.refresh = async () => { throw new Error('Synthetic transient refresh failure'); };
@@ -806,6 +832,22 @@ for (const history of [[], null]) {
     });
 }
 
+test('a successful but empty HTTP body is a history error, while a JSON empty array is the empty state', async () => {
+    const ui = bootWithAccount(), response = deferred();
+    ui.env.respondAccount = async url => url.includes('/transactions') ? response.promise : reply(200, accountFixture());
+    await settle();
+    equal(ui.get('historyTableBody').textContent, 'Loading transactions…');
+    response.resolve({ status: 200, ok: true, json: async () => JSON.parse('') });
+    await settle();
+    assert(ui.get('historyTableBody').textContent.includes('history is unavailable'));
+    assert(ui.get('recentTransactionsStatus').textContent.includes('history is unavailable'));
+    ui.env.respondAccount = async () => ({ status: 200, ok: true, json: async () => JSON.parse('[]') });
+    ui.tick(); await settle(); ui.navigate('#transactions');
+    equal(ui.get('historyTableBody').textContent, 'No transactions found for this account.');
+    equal(ui.get('recentTransactionsStatus').textContent, 'No transactions found for this account.');
+    equal(ui.intervals.size, 1); equal(ui.env.calls.length, 0);
+});
+
 test('transaction history has distinct loading and error states and preserves data on later failures', async () => {
     const ui = bootWithAccount(), response = deferred();
     ui.env.respondAccount = async url => url.includes('/transactions') ? response.promise : reply(200, accountFixture());
@@ -826,11 +868,14 @@ test('transaction history has distinct loading and error states and preserves da
     ui.env.respondAccount = async () => reply(503, {});
     ui.tick(); await settle();
     equal(table.textContent, previous);
+    const calls = ui.env.readCalls.length;
     ui.visibility('hidden');
-    assert(ui.get('historyUpdateNote').textContent.includes('paused'));
     equal(ui.intervals.size, 0);
+    ui.tick(); await settle();
+    equal(ui.env.readCalls.length, calls);
     ui.visibility('visible'); await settle();
     equal(ui.intervals.size, 1);
+    equal(ui.env.readCalls.length, calls + 1);
 });
 
 test('invalid monetary input shows an inline error without creating an intent or financial request', async () => {
@@ -867,6 +912,264 @@ test('native form validation exposes accessible inline feedback and clears it on
     }
     assert(ui.html.includes('class="skip-link"'));
     assert(!ui.html.includes('fonts.googleapis.com'));
+});
+
+test('transfer help opens a labelled dialog, focuses its close control and makes no API requests', async () => {
+    const ui = bootWithAccount(); await settle();
+    ui.navigate('#transfers');
+    const button = ui.get('transferHelpButton'), dialog = ui.get('transferHelp');
+    const calls = ui.env.readCalls.length, refreshes = ui.env.refreshCalls.length;
+    equal(button.getAttribute('type'), 'button');
+    equal(button.getAttribute('aria-label'), 'Help with transfers and recovery');
+    equal(button.getAttribute('aria-haspopup'), 'dialog');
+    equal(button.getAttribute('aria-controls'), 'transferHelp');
+    equal(dialog.tagName, 'DIALOG');
+    equal(dialog.getAttribute('aria-labelledby'), 'transferHelpTitle');
+    equal(dialog.getAttribute('aria-describedby'), 'transferHelpDescription');
+    assert(ui.html.includes('type="button" autofocus>Got it'));
+    assert(!dialog.open);
+    button.focus(); button.fire('click'); button.fire('click'); await settle();
+    assert(dialog.open);
+    equal(ui.document.activeElement, ui.get('closeTransferHelp'));
+    equal(ui.env.readCalls.length, calls); equal(ui.env.refreshCalls.length, refreshes);
+    equal(ui.env.calls.length, 0); equal(ui.intervals.size, 1);
+    ui.get('closeTransferHelp').fire('click');
+    assert(!dialog.open);
+    equal(ui.document.activeElement, button);
+});
+
+test('native dialog cancellation returns focus to the help control without affecting transfers', async () => {
+    const ui = boot(); await settle(); fill(ui);
+    ui.env.respond = async () => { throw new Error('Synthetic lost response'); };
+    ui.get('transferForm').fire('submit'); await settle();
+    ui.navigate('#transfers');
+    const saved = [...ui.env.storage.entries()], details = ui.get('transferDetails').textContent;
+    ui.get('transferHelpButton').focus(); ui.get('transferHelpButton').fire('click');
+    // Model the browser's default Escape/cancel behavior; real keyboard handling is browser-tested.
+    ui.get('transferHelp').cancel(); await settle();
+    assert(!ui.get('transferHelp').open);
+    equal(ui.document.activeElement, ui.get('transferHelpButton'));
+    equal([...ui.env.storage.entries()], saved);
+    equal(ui.get('transferDetails').textContent, details);
+    equal(ui.env.calls.length, 1);
+});
+
+test('customer help and nearby copy omit infrastructure details and the polling notice', async () => {
+    const ui = boot(); await settle();
+    const help = ui.html.match(/<dialog\b[^>]*>([\s\S]*?)<\/dialog>/)[1];
+    assert(help.includes('check the saved transfer’s status before sending another payment'));
+    assert(help.includes('Transfers are never resent automatically'));
+    assert(help.includes('confirming a separate duplicate requests another payment'));
+    assert(!/network[12]|browser storage|UUID|service mesh|OpenShift|demo|Ledger|Orchestrator/i.test(ui.html));
+    assert(!ui.html.includes('sidebar-footer'));
+    assert(!ui.html.includes('context-help'));
+    assert(!ui.html.includes('historyUpdateNote'));
+    assert(!readFile('src/intermesh-ui/src/js/app.js').includes('Updates every 15 seconds'));
+});
+
+
+function visibleViews(ui) {
+    return ['dashboard', 'accountOverview', 'transfers', 'transactions'].filter(id => !ui.get(id).hidden);
+}
+
+test('each view changes heading and focus without another API request, refresh, login or polling loop', async () => {
+    const ui = bootWithAccount(); await settle();
+    equal(visibleViews(ui), ['dashboard']);
+    const reads = ui.env.readCalls.length, refreshes = ui.env.refreshCalls.length;
+    const summary = ui.get('onboardingTarget').textContent;
+    for (const [id, title] of [['transfers', 'Transfers'], ['transactions', 'History'], ['accountOverview', 'My Account'], ['dashboard', 'My Dashboard']]) {
+        ui.navigate('#' + id);
+        equal(visibleViews(ui), [id]); equal(ui.get('pageTitle').textContent, title);
+        equal(ui.document.title, `${title} · InterMesh Bank`);
+        equal(ui.document.activeElement, ui.get('pageTitle'));
+        equal(ui.intervals.size, 1); equal(ui.visibilityListeners.size, 1);
+    }
+    equal(ui.env.readCalls.length, reads); equal(ui.env.refreshCalls.length, refreshes);
+    equal(ui.env.initCalls, 1); equal(ui.env.loginCalls, 0); equal(ui.env.calls.length, 0);
+    equal(ui.get('onboardingTarget').textContent, summary);
+    for (const [link, target] of [['dashboardAccountLink', 'accountOverview'], ['dashboardTransferLink', 'transfers'],
+        ['dashboardHistoryLink', 'transactions'], ['dashboardRecentLink', 'transactions']]) {
+        equal(ui.get(link).getAttribute('href'), '#' + target);
+    }
+});
+
+test('Back and Forward restore views while preserving the draft, balance and shared polling', async () => {
+    const ui = bootWithAccount(); await settle();
+    ui.navigate('#transfers'); fill(ui, '9999999999999.99', 'SYNTHETIC-DESTINATION');
+    ui.navigate('#transactions'); ui.navigate('#accountOverview');
+    ui.window.history.back(); equal(visibleViews(ui), ['transactions']);
+    ui.window.history.back(); equal(visibleViews(ui), ['transfers']);
+    equal(ui.get('transferAmount').value, '9999999999999.99');
+    equal(ui.get('targetAccount').value, 'SYNTHETIC-DESTINATION');
+    ui.window.history.forward(); equal(visibleViews(ui), ['transactions']);
+    ui.window.history.forward(); equal(visibleViews(ui), ['accountOverview']);
+    equal(ui.intervals.size, 1); equal(ui.env.readCalls.length, 2); equal(ui.env.calls.length, 0);
+});
+
+for (const section of ['dashboard', 'accountOverview', 'transfers', 'transactions', 'unknown']) {
+    test(`direct fragment #${section} selects a view after one authentication initialization`, async () => {
+        const ui = boot(null, '#' + section); await settle();
+        equal(visibleViews(ui), [section === 'unknown' ? 'dashboard' : section]);
+        equal(ui.document.activeElement, ui.get('pageTitle'));
+        equal(ui.env.initCalls, 1); equal(ui.env.loginCalls, 0);
+    });
+}
+
+test('navigation preserves an in-flight financial POST, exact amount, UUID and busy state', async () => {
+    const ui = bootWithAccount(); await settle();
+    const pending = deferred(); ui.env.respond = () => pending.promise;
+    ui.navigate('#transfers'); fill(ui, '12.30'); ui.get('transferForm').fire('submit'); await settle();
+    const saved = [...ui.env.storage.entries()], body = ui.env.calls[0].body;
+    for (const view of ['transactions', 'accountOverview', 'dashboard', 'transfers']) {
+        ui.navigate('#' + view);
+        equal(ui.get('transferAmount').value, '12.30'); assert(ui.get('btnTransfer').disabled);
+        assert(ui.get('targetAccount').readOnly);
+    }
+    ui.get('transferForm').fire('submit'); await settle();
+    equal(ui.env.calls.length, 1); equal(ui.env.uuidCount, 1); equal([...ui.env.storage.entries()], saved);
+    pending.resolve(commit()); await settle();
+    equal(ui.env.calls.length, 1); equal(ui.env.calls[0].body, body);
+    assert(ui.get('transferStatus').textContent.includes('APPROVED'));
+    ui.navigate('#dashboard'); ui.navigate('#transfers');
+    equal(ui.env.calls.length, 1); assert(ui.get('transferStatus').textContent.includes('APPROVED'));
+});
+
+test('account loading, onboarding draft and creation busy state survive view changes', async () => {
+    const ui = boot(), lookup = deferred(), creation = deferred();
+    ui.env.respondAccount = () => lookup.promise; await settle();
+    ui.navigate('#accountOverview'); ui.navigate('#dashboard');
+    assert(ui.get('dashboardAccountSummary').hidden);
+    equal(ui.get('dashboardAccountStatus').textContent, 'Loading your account…');
+    lookup.resolve(reply(404, {})); await settle();
+    ui.navigate('#accountOverview');
+    ui.get('holderName').value = 'Synthetic customer'; ui.get('initialDeposit').value = '42.00';
+    ui.navigate('#transfers'); ui.navigate('#accountOverview');
+    equal(ui.get('holderName').value, 'Synthetic customer'); equal(ui.get('initialDeposit').value, '42.00');
+    ui.env.respondAccount = (url, options) => options.method === 'POST' ? creation.promise : reply(200, []);
+    ui.get('onboardingForm').fire('submit'); await settle();
+    ui.navigate('#dashboard'); assert(ui.get('dashboardAccountSummary').hidden);
+    assert(ui.get('dashboardAccountStatus').textContent.includes('Opening your account'));
+    ui.navigate('#accountOverview'); ui.get('onboardingForm').fire('submit'); await settle();
+    equal(ui.env.readCalls.filter(call => call.method === 'POST').length, 1);
+    creation.resolve(reply(200, { account_details: accountFixture() })); await settle();
+    assert(!ui.get('onboardingTarget').classes.has('hidden'));
+    assert(!ui.get('dashboardAccountSummary').hidden); equal(ui.intervals.size, 1);
+});
+
+test('Dashboard shares real balance and only three safe recent rows with History and one polling loop', async () => {
+    const ui = bootWithAccount();
+    const hostile = '<img src=x onerror=alert(1)>';
+    let rows = Array.from({ length: 5 }, (_, index) => ({ transaction_id: 'TX-' + index,
+        target_iban: index === 0 ? hostile : 'SYNTHETIC-' + index, amount: 12.30,
+        timestamp: '2026-11-23 12:30:00', status: index === 0 ? hostile : 'APPROVED' }));
+    ui.env.respondAccount = async url => url.includes('/transactions') ? reply(200, rows) : reply(200, accountFixture());
+    await settle();
+    const summary = ui.get('dashboardAccountSummary'), recent = ui.get('recentTransactionsList');
+    assert(summary.textContent.includes('€123.45')); assert(summary.textContent.includes('Balance snapshot'));
+    assert(!summary.textContent.includes('SYNTHETIC-IBAN'));
+    equal(recent.children.length, 3); equal(ui.get('historyTableBody').children.length, 5);
+    assert(recent.textContent.includes(hostile)); assert(recent.textContent.includes('23 Nov 2026, 12:30'));
+    assert(recent.textContent.includes('€12.30')); assertNoHTMLParsing(recent);
+    rows = []; ui.navigate('#transfers'); ui.tick(); await settle();
+    equal(recent.children.length, 0); assert(recent.hidden);
+    equal(ui.get('recentTransactionsStatus').textContent, 'No transactions found for this account.');
+    equal(ui.get('historyTableBody').textContent, 'No transactions found for this account.');
+    equal(ui.intervals.size, 1); equal(ui.env.readCalls.length, 3);
+});
+
+test('IBAN copying gives accessible success feedback without API calls and survives navigation', async () => {
+    const ui = bootWithAccount(); await settle(); ui.navigate('#accountOverview');
+    const pending = deferred(); ui.env.copy = () => pending.promise;
+    ui.get('copyIban').fire('click'); await settle();
+    equal(ui.env.clipboardWrites, ['SYNTHETIC-IBAN']);
+    assert(ui.get('copyIban').disabled); equal(ui.get('ibanCopyStatus').textContent, 'Copying IBAN…');
+    ui.navigate('#dashboard'); ui.navigate('#accountOverview');
+    pending.resolve(); await settle();
+    equal(ui.get('ibanCopyStatus').textContent, 'IBAN copied.'); assert(!ui.get('copyIban').disabled);
+    equal(ui.get('ibanCopyStatus').getAttribute('role'), 'status');
+    equal(ui.env.readCalls.length, 2); equal(ui.env.calls.length, 0);
+});
+
+for (const failure of ['denied', 'unavailable']) {
+    test(`clipboard ${failure} preserves selectable IBAN and provides an accessible manual fallback`, async () => {
+        const ui = bootWithAccount(); await settle();
+        if (failure === 'denied') ui.env.copy = async () => { throw new Error('Synthetic permission denial'); };
+        else ui.navigator.clipboard = undefined;
+        ui.get('copyIban').fire('click'); await settle();
+        assert(ui.get('ibanCopyStatus').textContent.includes('copy it manually'));
+        assert(ui.get('onboardingTarget').textContent.includes('SYNTHETIC-IBAN'));
+        assert(!ui.get('copyIban').disabled); equal(ui.env.calls.length, 0);
+    });
+}
+
+for (const change of ['logout', 'identity']) {
+    test(`${change} clears dashboard data and prevents an awaited clipboard write restoring old feedback`, async () => {
+        const ui = bootWithAccount(); await settle();
+        const pending = deferred(); ui.env.copy = () => pending.promise;
+        ui.get('copyIban').fire('click'); await settle();
+        if (change === 'logout') ui.get('logoutBtn').fire('click');
+        else {
+            ui.env.respondAccount = async () => reply(404, {});
+            ui.env.keycloak.tokenParsed = { ...ui.env.claims, sub: 'synthetic-b', preferred_username: 'synthetic-b' };
+            ui.env.keycloak.onAuthRefreshSuccess();
+        }
+        await settle(); pending.resolve(); await settle();
+        equal(ui.get('dashboardAccountSummary').textContent, ''); equal(ui.get('recentTransactionsList').children.length, 0);
+        equal(ui.get('ibanCopyStatus').textContent, ''); assert(ui.get('ibanCopyControls').hidden);
+    });
+}
+
+test('authentication pause is visible in every view while retaining the shared account and draft', async () => {
+    const ui = bootWithAccount(); await settle(); fill(ui);
+    ui.env.refresh = async () => { throw new Error('Synthetic transient failure'); };
+    ui.tick(); await settle();
+    for (const view of ['dashboard', 'accountOverview', 'transfers', 'transactions']) {
+        ui.navigate('#' + view);
+        assert(!ui.get('authenticationStatus').hidden);
+        assert(ui.get('authenticationStatus').textContent.includes('Requests are paused'));
+        assert(ui.get('dashboardAccountSummary').textContent.includes('€123.45'));
+        equal(ui.get('transferAmount').value, '12.30');
+    }
+    equal(ui.intervals.size, 0); assert(ui.get('copyIban').disabled);
+    equal(ui.env.calls.length, 0);
+});
+
+test('leaving Transfers closes its dialog without returning focus to a hidden control', async () => {
+    const ui = bootWithAccount(); await settle(); ui.navigate('#transfers');
+    ui.get('transferHelpButton').fire('click'); assert(ui.get('transferHelp').open);
+    ui.window.history.back();
+    equal(visibleViews(ui), ['dashboard']); assert(!ui.get('transferHelp').open);
+    equal(ui.document.activeElement, ui.get('pageTitle'));
+    ui.window.history.forward(); equal(visibleViews(ui), ['transfers']);
+    ui.get('skipToContent').fire('click');
+    equal(ui.document.activeElement, ui.get('pageTitle')); equal(ui.window.location.hash, '#transfers');
+});
+
+test('navigation retains an uncertain saved transfer without replaying or allocating another request', async () => {
+    const ui = bootWithAccount(); await settle(); fill(ui);
+    ui.env.respond = async () => { throw new Error('Synthetic lost response'); };
+    ui.get('transferForm').fire('submit'); await settle();
+    const saved = [...ui.env.storage.entries()], details = ui.get('transferDetails').textContent;
+    const reads = ui.env.readCalls.length;
+    for (const view of ['dashboard', 'transactions', 'accountOverview', 'transfers']) ui.navigate('#' + view);
+    equal([...ui.env.storage.entries()], saved); equal(ui.get('transferDetails').textContent, details);
+    equal(ui.env.calls.length, 1); equal(ui.env.uuidCount, 1); equal(ui.env.readCalls.length, reads);
+    assert(ui.get('sourceAccount').readOnly); assert(ui.get('transferStatus').textContent.includes('not confirmed'));
+    assert(!ui.get('checkTransfer').disabled);
+});
+
+test('logout clears recent activity and a late poll cannot restore Dashboard data', async () => {
+    const ui = bootWithAccount();
+    const transaction = { transaction_id: 'TX-A', target_iban: 'SYNTHETIC-PRIVATE-RECIPIENT',
+        amount: 12.30, status: 'PENDING', timestamp: '2026-11-23 12:00:00' };
+    ui.env.respondAccount = async url => url.includes('/transactions') ? reply(200, [transaction]) : reply(200, accountFixture());
+    await settle(); assert(ui.get('recentTransactionsList').textContent.includes(transaction.target_iban));
+    const pending = deferred(); ui.env.respondAccount = () => pending.promise;
+    ui.tick(); await settle(); ui.get('logoutBtn').fire('click'); await settle();
+    pending.resolve(reply(200, [transaction])); await settle();
+    for (const view of ['dashboard', 'transactions', 'accountOverview', 'transfers']) ui.navigate('#' + view);
+    equal(ui.get('recentTransactionsList').textContent, ''); equal(ui.get('dashboardAccountSummary').textContent, '');
+    assert(!ui.get('historyTableBody').textContent.includes(transaction.target_iban)); equal(ui.intervals.size, 0);
 });
 
 let failed = 0;

@@ -9,7 +9,7 @@
     <script type="module" src="js/app.js"></script>
 </head>
 <body>
-    <a class="skip-link" href="#dashboard">Skip to dashboard</a>
+    <a id="skipToContent" class="skip-link" href="#pageTitle">Skip to content</a>
     <div class="app-container">
         <aside class="sidebar" aria-label="Bank navigation">
             <a class="logo-area" href="#dashboard" aria-label="InterMesh Bank dashboard">
@@ -20,7 +20,7 @@
             </a>
             <p class="sidebar-label">Your banking</p>
             <nav class="nav-menu" aria-label="Main navigation">
-                <a id="dashboardLink" href="#dashboard" class="nav-item active" aria-current="location">
+                <a id="dashboardLink" href="#dashboard" class="nav-item active" aria-current="page">
                     <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/></svg>Dashboard
                 </a>
                 <a id="accountLink" href="#accountOverview" class="nav-item">
@@ -33,18 +33,14 @@
                     <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"/></svg>History
                 </a>
             </nav>
-            <div class="sidebar-footer">
-                <span class="demo-label">InterMesh Bank demo</span>
-                <p>Powered by OpenShift Service Mesh</p>
-            </div>
         </aside>
 
-        <main id="dashboard" class="main-content" tabindex="-1">
+        <main id="mainContent" class="main-content" tabindex="-1">
             <header class="top-bar">
                 <div class="page-title">
                     <p class="eyebrow">Everyday banking</p>
-                    <h1>My Dashboard</h1>
-                    <p class="subtitle">Welcome back. Your everyday banking, all in one place.</p>
+                    <h1 id="pageTitle" tabindex="-1">My Dashboard</h1>
+                    <p id="pageSubtitle" class="subtitle">Welcome back. Your everyday banking, all in one place.</p>
                 </div>
                 <div class="user-profile">
                     <div class="avatar" aria-hidden="true">--</div>
@@ -59,101 +55,134 @@
                 </div>
             </header>
 
-            <div class="dashboard-grid">
-                <section id="accountOverview" class="card account-card" aria-labelledby="accountTitle" tabindex="-1">
+            <p id="authenticationStatus" class="auth-notice" role="status" aria-live="polite" hidden></p>
+            <section id="dashboard" class="app-view dashboard-grid" aria-label="Dashboard" tabindex="-1">
+                <div class="card">
                     <div class="card-header">
-                        <div><p class="eyebrow">Your money</p><h2 id="accountTitle">Account Overview</h2></div>
-                        <span class="section-icon" aria-hidden="true">€</span>
+                        <div><p class="eyebrow">At a glance</p><h2>Your account</h2></div>
+                        <a id="dashboardAccountLink" class="text-link" href="#accountOverview">View account</a>
                     </div>
-                    <p id="accountStatus" class="account-status" role="status" aria-live="polite">Loading your account…</p>
-                    <button id="retryAccount" class="btn btn-secondary" type="button" hidden>Try again</button>
-                    <form id="onboardingForm" class="banking-form hidden" aria-label="Open an account">
-                        <div class="form-group">
-                            <label for="holderName">Account holder name</label>
-                            <input type="text" id="holderName" placeholder="Enter the account holder’s name" autocomplete="name" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="initialDeposit">Opening deposit (€)</label>
-                            <input type="number" id="initialDeposit" value="1000.00" min="0" step="0.01" inputmode="decimal" aria-describedby="depositHelp" required>
-                            <small id="depositHelp">Choose an opening balance for your demo account.</small>
-                        </div>
-                        <p id="onboardingError" class="form-error" role="alert" hidden></p>
-                        <button type="submit" class="btn btn-primary" id="btnOnboard" disabled>Open account</button>
-                    </form>
-                    <div id="onboardingTarget" class="account-summary hidden"></div>
-                </section>
+                    <p id="dashboardAccountStatus" class="account-status" role="status">Loading your account…</p>
+                    <div id="dashboardAccountSummary" hidden></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h2>Quick actions</h2></div>
+                    <div class="quick-actions">
+                        <a id="dashboardTransferLink" class="quick-action" href="#transfers"><span>New transfer</span><small>Send a payment or check a saved transfer</small><span aria-hidden="true">↗</span></a>
+                        <a id="dashboardHistoryLink" class="quick-action" href="#transactions"><span>Transaction history</span><small>Review your account activity</small><span aria-hidden="true">→</span></a>
+                    </div>
+                </div>
+                <div class="card dashboard-recent">
+                    <div class="card-header"><h2>Recent transactions</h2><a id="dashboardRecentLink" class="text-link" href="#transactions">View all</a></div>
+                    <p id="recentTransactionsStatus" class="account-status" role="status">Load or open an account to see recent activity.</p>
+                    <ul id="recentTransactionsList" class="recent-transactions" hidden></ul>
+                </div>
+            </section>
+            <section id="accountOverview" class="app-view card account-card detail-view" hidden aria-labelledby="accountTitle" tabindex="-1">
+                <div class="card-header">
+                    <div><p class="eyebrow">Your money</p><h2 id="accountTitle">Account Overview</h2></div>
+                    <span class="section-icon" aria-hidden="true">€</span>
+                </div>
+                <p id="accountStatus" class="account-status" role="status" aria-live="polite">Loading your account…</p>
+                <button id="retryAccount" class="btn btn-secondary" type="button" hidden>Try again</button>
+                <form id="onboardingForm" class="banking-form hidden" aria-label="Open an account">
+                    <div class="form-group">
+                        <label for="holderName">Account holder name</label>
+                        <input type="text" id="holderName" placeholder="Enter the account holder’s name" autocomplete="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="initialDeposit">Opening deposit (€)</label>
+                        <input type="number" id="initialDeposit" value="1000.00" min="0" step="0.01" inputmode="decimal" aria-describedby="depositHelp" required>
+                        <small id="depositHelp">Choose your opening deposit.</small>
+                    </div>
+                    <p id="onboardingError" class="form-error" role="alert" hidden></p>
+                    <button type="submit" class="btn btn-primary" id="btnOnboard" disabled>Open account</button>
+                </form>
+                <div id="onboardingTarget" class="account-summary hidden"></div>
+                <div id="ibanCopyControls" class="iban-copy" hidden>
+                    <button id="copyIban" type="button" class="btn btn-secondary">Copy IBAN</button>
+                    <p id="ibanCopyStatus" class="copy-status" role="status" aria-live="polite"></p>
+                </div>
+            </section>
 
-                <section id="transfers" class="card transfer-card" aria-labelledby="transferTitle" tabindex="-1">
-                    <div class="card-header">
-                        <div><p class="eyebrow">Payments</p><h2 id="transferTitle">New Transfer</h2></div>
-                        <span class="section-icon" aria-hidden="true">↗</span>
-                    </div>
-                    <p class="section-description">Send a transfer from an account you own.</p>
-                    <form id="transferForm" class="banking-form">
-                        <div class="form-group">
-                            <label for="sourceAccount">From account</label>
-                            <input type="text" id="sourceAccount" placeholder="Your account number" maxlength="50" spellcheck="false" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="targetAccount">Recipient IBAN</label>
-                            <input type="text" id="targetAccount" placeholder="Enter the destination IBAN" maxlength="34" spellcheck="false" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="transferAmount">Amount (€)</label>
-                            <input type="text" id="transferAmount" inputmode="decimal" placeholder="0.00" maxlength="256" aria-describedby="transferAmountHelp transferError" required>
-                            <small id="transferAmountHelp">Enter a positive amount with up to two decimal places.</small>
-                        </div>
-                        <p id="transferError" class="form-error" role="alert" hidden></p>
-                        <button type="submit" class="btn btn-primary" id="btnTransfer" disabled>Send transfer</button>
-                    </form>
-                    <div class="transfer-recovery" id="transferRecovery" hidden>
-                        <h3>Transfer activity</h3>
-                        <label for="savedTransfer">Saved requests</label>
-                        <select id="savedTransfer"></select>
-                        <p id="transferStatus" role="status" aria-live="polite"></p>
-                        <details class="request-details"><summary>Request details</summary><div id="transferDetails" class="transfer-details"></div></details>
-                        <div class="transfer-actions">
-                            <button type="button" class="btn btn-secondary" id="checkTransfer" disabled>Check status</button>
-                            <button type="button" class="btn btn-secondary" id="replayTransfer" disabled>Resend saved request</button>
-                            <button type="button" class="btn btn-secondary" id="confirmDuplicate" hidden disabled>Confirm separate duplicate</button>
-                            <button type="button" class="btn btn-secondary" id="newTransfer" disabled>New transfer</button>
+            <section id="transfers" class="app-view card transfer-card detail-view" hidden aria-labelledby="transferTitle" tabindex="-1">
+                <div class="card-header">
+                    <div>
+                        <p class="eyebrow">Payments</p>
+                        <div class="title-with-help">
+                            <h2 id="transferTitle">New Transfer</h2>
+                            <button id="transferHelpButton" class="help-button" type="button" aria-label="Help with transfers and recovery" aria-haspopup="dialog" aria-controls="transferHelp">?</button>
                         </div>
                     </div>
-                    <details class="context-help">
-                        <summary>About transfers and recovery</summary>
-                        <p>Amounts must be positive and no greater than €9,999,999,999,999.99, with up to two decimal places.</p>
-                        <p>Status checks are read-only. Resending a saved request uses the same UUID and unchanged values; it does not restart an admitted workflow. Transfers are never automatically retried.</p>
-                        <p>Requests are saved in this tab for the signed-in user, including after logout. Sign in as the same user to recover them. Browser storage is specific to this frontend origin and does not move between network1 and network2. Closing the tab can remove saved requests.</p>
-                    </details>
-                </section>
+                    <span class="section-icon" aria-hidden="true">↗</span>
+                </div>
+                <p class="section-description">Send a transfer from an account you own.</p>
+                <form id="transferForm" class="banking-form">
+                    <div class="form-group">
+                        <label for="sourceAccount">From account</label>
+                        <input type="text" id="sourceAccount" placeholder="Your account number" maxlength="50" spellcheck="false" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="targetAccount">Recipient IBAN</label>
+                        <input type="text" id="targetAccount" placeholder="Enter the destination IBAN" maxlength="34" spellcheck="false" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="transferAmount">Amount (€)</label>
+                        <input type="text" id="transferAmount" inputmode="decimal" placeholder="0.00" maxlength="256" aria-describedby="transferAmountHelp transferError" required>
+                        <small id="transferAmountHelp">Enter a positive amount with up to two decimal places.</small>
+                    </div>
+                    <p id="transferError" class="form-error" role="alert" hidden></p>
+                    <button type="submit" class="btn btn-primary" id="btnTransfer" disabled>Send transfer</button>
+                </form>
+                <div class="transfer-recovery" id="transferRecovery" hidden>
+                    <h3>Transfer activity</h3>
+                    <label for="savedTransfer">Saved requests</label>
+                    <select id="savedTransfer"></select>
+                    <p id="transferStatus" role="status" aria-live="polite"></p>
+                    <details class="request-details"><summary>Request details</summary><div id="transferDetails" class="transfer-details"></div></details>
+                    <div class="transfer-actions">
+                        <button type="button" class="btn btn-secondary" id="checkTransfer" disabled>Check status</button>
+                        <button type="button" class="btn btn-secondary" id="replayTransfer" disabled>Resend saved request</button>
+                        <button type="button" class="btn btn-secondary" id="confirmDuplicate" hidden disabled>Confirm separate duplicate</button>
+                        <button type="button" class="btn btn-secondary" id="newTransfer" disabled>New transfer</button>
+                    </div>
+                </div>
+            </section>
 
-                <section id="transactions" class="card table-card" aria-labelledby="historyTitle" tabindex="-1">
-                    <div class="card-header">
-                        <div><p class="eyebrow">Account activity</p><h2 id="historyTitle">Transaction History</h2></div>
-                        <span id="historyUpdateNote" class="table-note">Load an account to view activity</span>
-                    </div>
-                    <p class="mobile-table-help" id="tableHelp" hidden>Scroll horizontally to see all transaction details.</p>
-                    <div class="table-wrapper" role="region" aria-label="Transaction history" aria-describedby="tableHelp" tabindex="0">
-                        <table id="historyTable" class="banking-table is-empty">
-                            <caption class="sr-only">Transactions for the loaded account. Dates and times are shown as recorded by the Ledger.</caption>
-                            <thead>
-                                <tr>
-                                    <th scope="col">Transaction</th>
-                                    <th scope="col">Recipient IBAN</th>
-                                    <th scope="col" class="amount-cell">Amount</th>
-                                    <th scope="col">Status</th>
-                                    <th scope="col">Date &amp; time</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyTableBody">
-                                <tr><td colspan="5" class="empty-state">Load or open an account to view its transactions.</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
-            </div>
+            <section id="transactions" class="app-view card table-card" hidden aria-labelledby="historyTitle" tabindex="-1">
+                <div class="card-header">
+                    <div><p class="eyebrow">Account activity</p><h2 id="historyTitle">Transaction History</h2></div>
+                </div>
+                <p class="mobile-table-help" id="tableHelp" hidden>Scroll horizontally to see all transaction details.</p>
+                <div class="table-wrapper" role="region" aria-label="Transaction history" aria-describedby="tableHelp" tabindex="0">
+                    <table id="historyTable" class="banking-table is-empty">
+                        <caption class="sr-only">Transactions for the loaded account. Dates and times are shown as recorded for your account.</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Transaction</th>
+                                <th scope="col">Recipient IBAN</th>
+                                <th scope="col" class="amount-cell">Amount</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Date &amp; time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr><td colspan="5" class="empty-state">Load or open an account to view its transactions.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         </main>
     </div>
+    <dialog id="transferHelp" class="help-dialog" aria-labelledby="transferHelpTitle" aria-describedby="transferHelpDescription">
+        <h2 id="transferHelpTitle">Transfers and recovery</h2>
+        <div id="transferHelpDescription">
+            <p>Choose an account you own, enter the recipient’s IBAN and a positive amount with up to two decimal places.</p>
+            <p>If your connection is interrupted or the result is unclear, keep this tab open and check the saved transfer’s status before sending another payment.</p>
+            <p>Transfers are never resent automatically. Resend a saved request only after checking its status; it uses the original transfer details. Submitting a new transfer or confirming a separate duplicate requests another payment.</p>
+        </div>
+        <button id="closeTransferHelp" class="btn btn-primary" type="button" autofocus>Got it</button>
+    </dialog>
     <div id="notificationToast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>

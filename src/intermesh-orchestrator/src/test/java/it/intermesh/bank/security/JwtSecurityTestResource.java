@@ -273,6 +273,10 @@ public class JwtSecurityTestResource implements QuarkusTestResourceLifecycleMana
                     respond(exchange, 503, Map.of("error", "Synthetic upstream detail"));
                 } else if (id.equals("ACC-NULL-HISTORY")) {
                     respond(exchange, 200, null);
+                } else if (id.equals("ACC-EMPTY-BODY-HISTORY")) {
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, -1);
+                    exchange.close();
                 } else if (id.equals("ACC-TEST") || id.equals("ACC-EMPTY")) {
                     respond(exchange, 200, List.of());
                 } else {

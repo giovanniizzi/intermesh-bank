@@ -13,7 +13,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+html { scroll-padding-top: 24px; }
 body { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-main); line-height: 1.5; }
 button, input, select { font: inherit; }
 button, a, input, select, summary { -webkit-tap-highlight-color: transparent; }
@@ -37,8 +37,6 @@ a { color: var(--primary); }
 .nav-item svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
 .nav-item:hover { background: #1c2d48; color: white; }
 .nav-item.active { background: #243c61; color: white; box-shadow: inset 3px 0 #7daeff; }
-.sidebar-footer { margin-top: auto; padding: 24px 12px 0; border-top: 1px solid #2a3b55; color: #9aaec9; font-size: 11px; }
-.demo-label { display: block; color: #ccd7e7; font-size: 12px; font-weight: 500; margin-bottom: 4px; }
 
 /* Dashboard */
 .main-content { margin-left: 232px; padding: 42px clamp(24px, 4vw, 64px) 56px; max-width: 1680px; }
@@ -60,6 +58,23 @@ h2 { font-size: 20px; font-weight: 600; line-height: 1.3; letter-spacing: -.4px;
 h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .section-icon { display: flex; width: 40px; height: 40px; border-radius: 12px; align-items: center; justify-content: center; color: var(--primary); background: #eef3fd; font-size: 23px; }
 .section-description { color: var(--text-muted); font-size: 13px; margin: -10px 0 24px; }
+.detail-view { max-width: 760px; }
+.text-link { font-size: 12px; font-weight: 600; text-underline-offset: 4px; padding: 12px 0; }
+.quick-actions { display: grid; gap: 14px; }
+.quick-action { position: relative; display: grid; gap: 6px; padding: 18px 44px 18px 18px; border: 1px solid var(--border-color); border-radius: 12px; color: var(--text-main); text-decoration: none; }
+.quick-action:hover { background: #f5f7fb; border-color: #a8bee3; }
+.quick-action > span:first-child { font-weight: 600; font-size: 14px; }
+.quick-action small { color: var(--text-muted); font-size: 12px; }
+.quick-action > span:last-child { position: absolute; right: 18px; top: 20px; color: var(--primary); }
+.dashboard-recent { grid-column: 1 / -1; }
+.recent-transactions { list-style: none; }
+.recent-transactions li { display: flex; justify-content: space-between; gap: 20px; padding: 18px 0; border-top: 1px solid var(--border-color); font-size: 13px; }
+.recent-transactions li > div { display: grid; gap: 7px; min-width: 0; overflow-wrap: anywhere; }
+.recent-transactions li > div:last-child { justify-items: end; flex-shrink: 0; }
+.recent-transactions small { color: var(--text-muted); font-size: 11px; }
+.recent-transactions strong { font-variant-numeric: tabular-nums; }
+.recent-transactions .status-pill { width: fit-content; }
+.auth-notice { padding: 16px 20px; margin-bottom: 24px; border: 1px solid #e1be79; border-radius: 10px; background: #fff6e3; color: #6b4a0c; font-size: 13px; }
 
 /* Account states and summary */
 .account-status { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; }
@@ -72,6 +87,8 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .account-details dt { color: var(--text-muted); font-size: 11px; margin-bottom: 4px; }
 .account-details dd { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .account-details .iban { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; letter-spacing: .5px; }
+.iban-copy { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.copy-status { color: var(--text-muted); font-size: 12px; }
 
 /* Forms and recovery */
 .banking-form { display: flex; flex-direction: column; gap: 20px; }
@@ -98,14 +115,18 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 #transferStatus { margin: 16px 0; line-height: 1.7; font-size: 12px; overflow-wrap: anywhere; white-space: pre-line; }
 .transfer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .transfer-actions .btn { padding: 10px 12px; font-size: 11px; min-height: 44px; }
-.context-help { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-color); font-size: 12px; color: var(--text-muted); }
-.context-help summary, .request-details summary { cursor: pointer; color: #385478; font-weight: 500; padding: 5px 0; }
-.context-help p { margin-top: 12px; line-height: 1.7; }
+.request-details summary { cursor: pointer; color: #385478; font-weight: 500; padding: 5px 0; }
 .request-details { font-size: 12px; }
+.title-with-help { display: flex; align-items: center; gap: 8px; }
+.help-button { min-width: 44px; min-height: 44px; border: 1px solid var(--border-color); border-radius: 50%; background: white; color: var(--primary); font-size: 18px; cursor: pointer; }
+.help-button:hover { background: #eef3fd; }
+.help-dialog { margin: auto; width: min(440px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow-y: auto; padding: 28px; border: 1px solid var(--border-color); border-radius: 16px; color: var(--text-main); box-shadow: var(--shadow); }
+.help-dialog::backdrop { background: rgb(17 30 53 / 55%); }
+.help-dialog p { margin-top: 16px; color: var(--text-muted); font-size: 14px; line-height: 1.7; }
+.help-dialog .btn { width: 100%; margin-top: 24px; }
 
 /* Transaction history */
 .table-card { grid-column: 1 / -1; padding-bottom: 12px; }
-.table-note { color: var(--text-muted); font-size: 11px; max-width: 26ch; text-align: right; }
 .table-wrapper { overflow-x: auto; border-radius: 8px; }
 .banking-table { width: 100%; min-width: 680px; border-collapse: collapse; text-align: left; font-size: 12px; }
 .banking-table th { padding: 13px 14px; font-weight: 500; color: var(--text-muted); background: #f5f7fb; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
@@ -149,7 +170,7 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
     .sidebar { position: static; width: 100%; padding: 18px 16px 12px; }
     .logo-area { margin: 0 4px 20px; }
     .logo-text span { display: inline; margin-left: 5px; font-size: 17px; letter-spacing: -.3px; }
-    .sidebar-label, .sidebar-footer { display: none; }
+    .sidebar-label { display: none; }
     .nav-menu { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
     .nav-item { flex-direction: column; justify-content: center; gap: 6px; padding: 10px 3px; font-size: 11px; min-height: 60px; }
     .nav-item.active { box-shadow: inset 0 -3px #7daeff; }
@@ -163,7 +184,6 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
     .account-balance { padding: 24px 20px; }
     .balance-value { font-size: 34px; }
     .table-card .card-header { align-items: flex-start; }
-    .table-note { max-width: 19ch; font-size: 10px; }
     .mobile-table-help { display: block; }
     .transfer-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     .toast { bottom: 16px; right: 16px; }

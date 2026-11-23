@@ -20,6 +20,16 @@ let transferLoadError = false;
 let accountState = 'loading';
 let onboardingBusy = false;
 let historyLoaded = false;
+const appState = {
+    view: 'dashboard', account: null, transactions: null, copyingIban: false,
+    historyMessage: 'Load or open an account to view its transactions.'
+};
+const views = {
+    dashboard: { title: 'My Dashboard', subtitle: 'Welcome back. Your everyday banking, all in one place.' },
+    accountOverview: { title: 'My Account', subtitle: 'Your account details and balance snapshot.' },
+    transfers: { title: 'Transfers', subtitle: 'Send a payment or check a saved transfer.' },
+    transactions: { title: 'History', subtitle: 'Review your account activity and transfer statuses.' }
+};
 
 const keycloak = new Keycloak({
     url: 'PLACEHOLDER_KEYCLOAK_URL',
@@ -118,15 +128,12 @@ function renderAccountState(state, message) {
     document.getElementById('retryAccount').hidden = state !== 'error' || authenticationBlocked;
     document.getElementById('btnOnboard').disabled = state !== 'empty' || onboardingBusy || authenticationBlocked;
     document.getElementById('btnOnboard').textContent = onboardingBusy ? 'Opening account…' : 'Open account';
+    document.getElementById('ibanCopyControls').hidden = state !== 'ready';
+    document.getElementById('copyIban').disabled = authenticationBlocked || appState.copyingIban || state !== 'ready';
+    renderDashboardAccount(state, status.textContent);
 }
 
-function showAccount(account) {
-    if (!account || typeof account.account_id !== 'string' || !account.account_id.trim()
-            || typeof account.iban !== 'string' || !account.iban.trim() || !Number.isFinite(account.balance)) {
-        throw new Error('Account information is unavailable.');
-    }
-    activeAccountID = account.account_id;
-    sourceAccountInput.value = activeAccountID;
+function accountBalancePanel(account) {
     const balance = document.createElement('div');
     balance.className = 'account-balance';
     const label = textElement('span', 'Available balance');
@@ -136,6 +143,53 @@ function showAccount(account) {
     const note = textElement('p', 'Balance snapshot at account load. Reload to update.');
     note.className = 'balance-note';
     balance.append(label, value, note);
+    return balance;
+}
+
+function renderDashboardAccount(state, message) {
+    const status = document.getElementById('dashboardAccountStatus');
+    const summary = document.getElementById('dashboardAccountSummary');
+    const ready = state === 'ready' && appState.account !== null;
+    status.textContent = message;
+    status.hidden = ready;
+    summary.hidden = !ready;
+    summary.replaceChildren();
+    document.getElementById('dashboardAccountLink').textContent = state === 'empty' ? 'Open account' : 'View account';
+    if (ready) {
+        summary.append(accountBalancePanel(appState.account), textElement('p', `Account ${appState.account.account_id}`));
+    }
+    renderDashboardActivity();
+}
+
+function renderDashboardActivity() {
+    const list = document.getElementById('recentTransactionsList');
+    const status = document.getElementById('recentTransactionsStatus');
+    const recent = appState.account ? (appState.transactions || []).slice(0, 3) : [];
+    list.replaceChildren();
+    list.hidden = recent.length === 0;
+    status.hidden = recent.length > 0;
+    status.textContent = appState.account ? appState.historyMessage : 'Load or open an account to see recent activity.';
+    for (const transaction of recent) {
+        const item = document.createElement('li');
+        const description = document.createElement('div');
+        const details = document.createElement('div');
+        description.append(textElement('span', transaction.target_iban), textElement('small', formatTimestamp(transaction.timestamp)));
+        details.append(textElement('strong', formatMoney(transaction.amount)), transactionStatus(transaction.status));
+        item.append(description, details);
+        list.append(item);
+    }
+}
+
+function showAccount(account) {
+    if (!account || typeof account.account_id !== 'string' || !account.account_id.trim()
+            || typeof account.iban !== 'string' || !account.iban.trim() || !Number.isFinite(account.balance)) {
+        throw new Error('Account information is unavailable.');
+    }
+    appState.account = account;
+    appState.transactions = null;
+    activeAccountID = account.account_id;
+    sourceAccountInput.value = activeAccountID;
+    document.getElementById('ibanCopyStatus').textContent = '';
     const details = document.createElement('dl');
     details.className = 'account-details';
     for (const [title, text] of [['Account number', activeAccountID], ['IBAN', account.iban]]) {
@@ -145,12 +199,36 @@ function showAccount(account) {
         item.append(textElement('dt', title), description);
         details.append(item);
     }
-    onboardingTarget.replaceChildren(balance, details);
+    onboardingTarget.replaceChildren(accountBalancePanel(account), details);
     renderAccountState('ready');
     historyLoaded = false;
     renderHistoryMessage('Loading transactions…');
     renderTransferState();
     startLedgerPolling(activeAccountID);
+}
+
+async function copyIban() {
+    const context = requestContext();
+    const account = appState.account;
+    if (!isCurrentRequest(context) || authenticationBlocked || accountState !== 'ready' || !account || appState.copyingIban) return;
+    const button = document.getElementById('copyIban');
+    const status = document.getElementById('ibanCopyStatus');
+    appState.copyingIban = true;
+    button.disabled = true;
+    status.textContent = 'Copying IBAN…';
+    try {
+        await navigator.clipboard.writeText(account.iban);
+        if (isCurrentRequest(context) && account === appState.account) status.textContent = 'IBAN copied.';
+    } catch {
+        if (isCurrentRequest(context) && account === appState.account) {
+            status.textContent = 'Copy isn’t available. Select the IBAN in your account details and copy it manually.';
+        }
+    } finally {
+        if (isCurrentRequest(context) && account === appState.account) {
+            appState.copyingIban = false;
+            button.disabled = authenticationBlocked;
+        }
+    }
 }
 
 // --- ACCOUNT DISCOVERY ON PAGE RELOAD ---
@@ -182,7 +260,6 @@ function startLedgerPolling(accountId) {
     const context = requestContext();
     const runPolling = () => {
         if (authenticationBlocked || !isCurrentRequest(context) || accountId !== activeAccountID) return;
-        document.getElementById('historyUpdateNote').textContent = 'Updates every 15 seconds while this tab is visible';
         if (pollingInterval) clearInterval(pollingInterval);
         
         fetchLedgerHistory(accountId);
@@ -197,7 +274,6 @@ function startLedgerPolling(accountId) {
             clearInterval(pollingInterval);
             pollingInterval = null;
         }
-        document.getElementById('historyUpdateNote').textContent = 'Updates paused while this tab is hidden';
     };
 
     pollingVisibilityHandler = () => {
@@ -220,8 +296,6 @@ function stopLedgerPolling() {
     pollingInterval = null;
     if (pollingVisibilityHandler) document.removeEventListener('visibilitychange', pollingVisibilityHandler);
     pollingVisibilityHandler = null;
-    document.getElementById('historyUpdateNote').textContent = activeAccountID
-        ? 'Updates paused' : 'Load an account to view activity';
 }
 
 async function fetchLedgerHistory(accountId) {
@@ -248,20 +322,51 @@ async function fetchLedgerHistory(accountId) {
     }
 }
 
+function setupNavigation() {
+    const navigation = [...document.querySelectorAll('.nav-item')];
+    const showView = (focus) => {
+        const requested = window.location.hash.slice(1);
+        const selected = Object.hasOwn(views, requested) ? requested : 'dashboard';
+        appState.view = selected;
+        const help = document.getElementById('transferHelp');
+        if (selected !== 'transfers' && help.open) help.close();
+        for (const id of Object.keys(views)) document.getElementById(id).hidden = id !== selected;
+        document.getElementById('pageTitle').textContent = views[selected].title;
+        document.getElementById('pageSubtitle').textContent = views[selected].subtitle;
+        document.title = `${views[selected].title} · InterMesh Bank`;
+        for (const link of navigation) {
+            const current = link.getAttribute('href') === `#${selected}`;
+            link.classList[current ? 'add' : 'remove']('active');
+            if (current) link.setAttribute('aria-current', 'page');
+            else link.removeAttribute('aria-current');
+        }
+        if (focus) {
+            window.scrollTo(0, 0);
+            document.getElementById('pageTitle').focus({ preventScroll: true });
+        }
+    };
+    window.addEventListener('hashchange', () => showView(true));
+    document.getElementById('skipToContent').addEventListener('click', event => {
+        event.preventDefault();
+        document.getElementById('pageTitle').focus();
+    });
+    showView(Boolean(window.location.hash));
+}
+
 function setupEventListeners() {
     const onboardingForm = document.getElementById('onboardingForm');
     const transferForm = document.getElementById('transferForm');
-    const navigation = [...document.querySelectorAll('.nav-item')];
-    const updateNavigation = () => {
-        const selected = navigation.find(link => link.getAttribute('href') === window.location.hash) || navigation[0];
-        for (const link of navigation) {
-            link.classList[link === selected ? 'add' : 'remove']('active');
-            if (link === selected) link.setAttribute('aria-current', 'location');
-            else link.removeAttribute('aria-current');
-        }
-    };
-    window.addEventListener('hashchange', updateNavigation);
-    updateNavigation();
+    const helpButton = document.getElementById('transferHelpButton');
+    const helpDialog = document.getElementById('transferHelp');
+    helpButton.addEventListener('click', () => {
+        if (!helpDialog.open) helpDialog.showModal();
+    });
+    document.getElementById('closeTransferHelp').addEventListener('click', () => helpDialog.close());
+    helpDialog.addEventListener('close', () => {
+        if (appState.view === 'transfers') helpButton.focus({ preventScroll: true });
+    });
+    setupNavigation();
+    document.getElementById('copyIban').addEventListener('click', copyIban);
     document.getElementById('retryAccount').addEventListener('click', () => {
         const userID = keycloak.tokenParsed?.preferred_username;
         if (!authenticationBlocked && userID) checkExistingAccount(userID);
@@ -362,14 +467,14 @@ function setupEventListeners() {
     document.getElementById('replayTransfer').addEventListener('click', () => {
         const intent = transferRequests?.active;
         if (!intent || transferRequests.busy) return;
-        if (window.confirm(`Replay request ${intent.transfer_request_id}?\n${intent.source_account} → ${intent.target_account}\n€${intent.amount}\n\nThe same UUID and values will be sent. If admission already exists, its workflow will not restart. If the earlier request never arrived, it may be admitted now.`)) {
+        if (window.confirm(`Resend saved transfer ${intent.transfer_request_id}?\n${intent.source_account} → ${intent.target_account}\n€${intent.amount}\n\nThe original transfer details will be used. If already accepted, the transfer will not be started again. If the earlier request never arrived, it may be accepted now.`)) {
             runTransferAction(requests => requests.send(intent.transfer_request_id));
         }
     });
     document.getElementById('confirmDuplicate').addEventListener('click', () => {
         const original = transferRequests?.active;
         if (!original || transferRequests.busy) return;
-        if (window.confirm(`Confirm a separate duplicate transfer?\nSource: ${original.source_account}\nDestination: ${original.target_account}\nAmount: €${original.amount}\n\nAn identical transfer is already pending. This action creates a new UUID with explicit duplicate approval. Only one exception is allowed per pending cycle.`)) {
+        if (window.confirm(`Confirm a separate duplicate transfer?\nSource: ${original.source_account}\nDestination: ${original.target_account}\nAmount: €${original.amount}\n\nAn identical transfer is already pending. Only confirm if you intend to request another payment with the same details. Only one separate duplicate can be approved while matching transfers are pending.`)) {
             runTransferAction(async requests => {
                 const approved = requests.approveDuplicate(original.transfer_request_id);
                 await requests.send(approved.transfer_request_id);
@@ -467,6 +572,9 @@ function suspendTransferView() {
     transferRequests = null;
     transferLoadError = false;
     activeAccountID = null;
+    appState.account = null;
+    appState.transactions = null;
+    appState.copyingIban = false;
     onboardingBusy = false;
     historyLoaded = false;
     stopLedgerPolling();
@@ -476,6 +584,7 @@ function suspendTransferView() {
     document.getElementById('transferAmount').value = '';
     onboardingTarget.textContent = '';
     onboardingTarget.classList.add('hidden');
+    document.getElementById('ibanCopyStatus').textContent = '';
     renderAccountState('signed-out');
     document.getElementById('onboardingError').hidden = true;
     showTransferError('');
@@ -490,6 +599,10 @@ function suspendTransferView() {
 }
 
 function renderTransferState() {
+    const authenticationStatus = document.getElementById('authenticationStatus');
+    authenticationStatus.hidden = !authenticationBlocked || sessionEnded;
+    authenticationStatus.textContent = authenticationStatus.hidden ? '' : AUTHENTICATION_PAUSED;
+    document.getElementById('copyIban').disabled = authenticationBlocked || appState.copyingIban || accountState !== 'ready';
     const requests = transferRequests?.isCurrent() ? transferRequests : null;
     const active = requests?.active;
     const busy = requests?.busy || false;
@@ -516,9 +629,9 @@ function renderTransferState() {
         + (active.transaction_id ? `\nTransaction: ${active.transaction_id}` : '')
         + (active.confirmation_request_id ? `\nSeparate duplicate request: ${active.confirmation_request_id}` : '') : '';
     status.textContent = transferLoadError
-        ? 'Saved transfer data is unavailable. Nothing will be sent. Preserve this tab’s sessionStorage for recovery.'
-        : active ? (busy ? 'Contacting Orchestrator. The saved UUID and transfer values are unchanged. ' : '') + describeIntent(active)
-        : 'Saved requests are retained. Starting another transfer creates a separate intent with a new UUID.';
+        ? 'Saved transfer information is unavailable. Nothing will be sent. Keep this tab open for recovery.'
+        : active ? (busy ? 'Checking your transfer. The saved request and transfer details are unchanged. ' : '') + describeIntent(active)
+        : 'Saved requests are retained. Start a new transfer only if you intend to request another payment.';
     if (authenticationBlocked && !sessionEnded) status.textContent = AUTHENTICATION_PAUSED + '\n' + status.textContent;
     for (const id of ['sourceAccount', 'targetAccount', 'transferAmount']) {
         document.getElementById(id).readOnly = Boolean(active) || unavailable || !requests;
@@ -585,6 +698,7 @@ function formatTimestamp(value) {
 }
 
 function renderHistoryMessage(message) {
+    appState.historyMessage = message;
     document.getElementById('historyTable').classList.add('is-empty');
     document.getElementById('tableHelp').hidden = true;
     const row = document.createElement('tr');
@@ -593,9 +707,11 @@ function renderHistoryMessage(message) {
     cell.className = 'empty-state';
     row.append(cell);
     historyTableBody.replaceChildren(row);
+    renderDashboardActivity();
 }
 
 function renderHistoryTable(transactions) {
+    appState.transactions = transactions || [];
     historyTableBody.replaceChildren();
     if (!transactions || transactions.length === 0) {
         renderHistoryMessage(activeAccountID ? 'No transactions found for this account.'
@@ -606,24 +722,26 @@ function renderHistoryTable(transactions) {
     document.getElementById('tableHelp').hidden = false;
     for (const tx of transactions) {
         const row = document.createElement('tr');
-        const knownStatus = ['PENDING', 'APPROVED', 'FAILED'].includes(tx.status);
-        const statusLabel = knownStatus ? tx.status[0] + tx.status.slice(1).toLowerCase() : tx.status;
         const fields = [['strong', tx.transaction_id], ['code', tx.target_iban],
-            ['strong', formatMoney(tx.amount)], ['span', statusLabel], ['small', formatTimestamp(tx.timestamp)]];
+            ['strong', formatMoney(tx.amount)], ['span', tx.status], ['small', formatTimestamp(tx.timestamp)]];
         for (const [index, [tag, text]] of fields.entries()) {
             const cell = document.createElement('td');
-            const content = textElement(tag, text);
+            const content = tag === 'span' ? transactionStatus(text) : textElement(tag, text);
             if (index === 2) cell.className = 'amount-cell';
-            if (tag === 'span') {
-                const status = String(tx.status).toLowerCase();
-                content.className = ['pending', 'approved', 'failed'].includes(status)
-                    ? `status-pill ${status}` : 'status-pill';
-            }
             cell.append(content);
             row.append(cell);
         }
         historyTableBody.append(row);
     }
+    renderDashboardActivity();
+}
+
+function transactionStatus(status) {
+    const known = ['PENDING', 'APPROVED', 'FAILED'].includes(status);
+    const label = known ? status[0] + status.slice(1).toLowerCase() : status;
+    const element = textElement('span', label);
+    element.className = known ? `status-pill ${status.toLowerCase()}` : 'status-pill';
+    return element;
 }
 
 function showToast(message, type) {

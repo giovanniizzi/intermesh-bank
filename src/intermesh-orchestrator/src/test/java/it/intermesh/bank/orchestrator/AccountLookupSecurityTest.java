@@ -531,6 +531,7 @@ public class AccountLookupSecurityTest {
         String session = aliceSession();
         given().cookie("JSESSIONID", session).header("Authorization", "Bearer " + token(claims("user-a")))
                 .get("/api/v1/account/ACC-ALICE/transactions").then().statusCode(200)
+                .contentType(ContentType.JSON)
                 .body("size()", is(1))
                 .body("[0].transaction_id", is("TX-ACC-ALICE"))
                 .body("[0].target_iban", is("TEST-TARGET-IBAN"))
@@ -617,16 +618,19 @@ public class AccountLookupSecurityTest {
     void ownedAccountWithNoTransactionsReturnsEmptyHistory() {
         given().header("Authorization", "Bearer " + token(claims("user-a")))
                 .get("/api/v1/account/ACC-EMPTY/transactions").then().statusCode(200)
-                .body("size()", is(0));
+                .contentType(ContentType.JSON).body(is("[]"));
         assertHistoryCalls(1, 1);
     }
 
     @Test
-    void nullLedgerHistoryPreservesExistingEmptyResponse() {
-        given().header("Authorization", "Bearer " + token(claims("user-a")))
-                .get("/api/v1/account/ACC-NULL-HISTORY/transactions").then().statusCode(200)
-                .body(is(""));
-        assertHistoryCalls(1, 1);
+    void nullLedgerHistoryReturnsEmptyJsonArray() {
+        for (String id : List.of("ACC-NULL-HISTORY", "ACC-EMPTY-BODY-HISTORY")) {
+            resetLedgerCalls();
+            given().header("Authorization", "Bearer " + token(claims("user-a")))
+                    .get("/api/v1/account/" + id + "/transactions").then().statusCode(200)
+                    .contentType(ContentType.JSON).body(is("[]"));
+            assertHistoryCalls(1, 1);
+        }
     }
 
     @Test

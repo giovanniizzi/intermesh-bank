@@ -60,11 +60,16 @@ func (r *AccountRepository) GetHistory(accountID string) ([]dto.TransactionHisto
 	}
 	defer rows.Close()
 
-	var history []dto.TransactionHistoryDTO
+	history := make([]dto.TransactionHistoryDTO, 0)
 	for rows.Next() {
 		var tx dto.TransactionHistoryDTO
-		rows.Scan(&tx.TransactionID, &tx.TargetIBAN, &tx.Amount, &tx.Status, &tx.Timestamp)
+		if err := rows.Scan(&tx.TransactionID, &tx.TargetIBAN, &tx.Amount, &tx.Status, &tx.Timestamp); err != nil {
+			return nil, err
+		}
 		history = append(history, tx)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return history, nil
 }

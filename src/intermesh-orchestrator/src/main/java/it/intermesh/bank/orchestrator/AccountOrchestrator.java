@@ -135,7 +135,7 @@ public class AccountOrchestrator {
             }
 
             List<TransactionHistoryDTO> history = ledgerClient.getTransactionHistory(accountId);
-            return Response.ok(history).build();
+            return Response.ok(history == null ? List.of() : history).build();
         } catch (WebApplicationException e) {
             int status = e.getResponse().getStatus();
             if (status == Response.Status.NOT_FOUND.getStatusCode()) {
