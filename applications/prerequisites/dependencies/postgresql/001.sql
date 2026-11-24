@@ -13,10 +13,10 @@ CREATE TABLE intermesh_accounts (
 );
 
 INSERT INTO intermesh_accounts (account_id, user_id, iban, holder_name, balance, frozen_balance) 
-VALUES ('ACC-1001', 'mario.rossi', 'IT99X0306905000000100001001', 'Mario Rossi', 10000.00, 0.00);
+VALUES ('ACC-1001', 'mario.rossi', 'IT29B0306905000000100001001', 'Mario Rossi', 10000.00, 0.00);
 
 INSERT INTO intermesh_accounts (account_id, user_id, iban, holder_name, balance, frozen_balance) 
-VALUES ('ACC-2002', 'john.doe', 'DE880306905000000100002002', 'John Doe', 500.00, 0.00);
+VALUES ('ACC-2002', 'john.doe', 'DE72030690500100002002', 'John Doe', 500.00, 0.00);
 
 INSERT INTO intermesh_accounts (account_id, user_id, iban, holder_name, balance, frozen_balance) 
-VALUES ('ACC-3003', 'giovanni.izzi', 'IT99X0306905000000100003003', 'Giovanni Luca Izzi', 100.00, 0.00);
+VALUES ('ACC-3003', 'giovanni.izzi', 'IT40K0306905000000100003003', 'Giovanni Luca Izzi', 100.00, 0.00);

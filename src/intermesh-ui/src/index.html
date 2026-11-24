@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#111e35">
-    <title>My Dashboard · InterMesh Bank</title>
+    <title>Dashboard · InterMesh Bank</title>
     <link rel="stylesheet" href="css/styles.css">
     <script type="module" src="js/app.js"></script>
 </head>
@@ -39,7 +39,7 @@
             <header class="top-bar">
                 <div class="page-title">
                     <p class="eyebrow">Everyday banking</p>
-                    <h1 id="pageTitle" tabindex="-1">My Dashboard</h1>
+                    <h1 id="pageTitle" tabindex="-1">Dashboard</h1>
                     <p id="pageSubtitle" class="subtitle">Welcome back. Your everyday banking, all in one place.</p>
                 </div>
                 <div class="user-profile">
@@ -68,12 +68,12 @@
                 <div class="card">
                     <div class="card-header"><h2>Quick actions</h2></div>
                     <div class="quick-actions">
-                        <a id="dashboardTransferLink" class="quick-action" href="#transfers"><span>New transfer</span><small>Send a payment or check a saved transfer</small><span aria-hidden="true">↗</span></a>
-                        <a id="dashboardHistoryLink" class="quick-action" href="#transactions"><span>Transaction history</span><small>Review your account activity</small><span aria-hidden="true">→</span></a>
+                        <a id="dashboardTransferLink" class="quick-action" href="#transfers"><span>New transfer</span><small>Send money from your account</small><span aria-hidden="true">↗</span></a>
+                        <a id="dashboardHistoryLink" class="quick-action" href="#transactions"><span>Transaction history</span><small>Review recent account activity</small><span aria-hidden="true">→</span></a>
                     </div>
                 </div>
                 <div class="card dashboard-recent">
-                    <div class="card-header"><h2>Recent transactions</h2><a id="dashboardRecentLink" class="text-link" href="#transactions">View all</a></div>
+                    <div class="card-header"><h2>Recent transactions</h2><a id="dashboardRecentLink" class="text-link" href="#transactions">View all transactions</a></div>
                     <p id="recentTransactionsStatus" class="account-status" role="status">Load or open an account to see recent activity.</p>
                     <ul id="recentTransactionsList" class="recent-transactions" hidden></ul>
                 </div>
@@ -120,20 +120,25 @@
                 <form id="transferForm" class="banking-form">
                     <div class="form-group">
                         <label for="sourceAccount">From account</label>
-                        <input type="text" id="sourceAccount" placeholder="Your account number" maxlength="50" spellcheck="false" required>
+                        <input type="text" id="sourceAccount" placeholder="Your account number" maxlength="50" spellcheck="false" aria-describedby="sourceAccountError" required>
+                        <small id="sourceAccountError" class="form-error" hidden></small>
                     </div>
                     <div class="form-group">
                         <label for="targetAccount">Recipient IBAN</label>
-                        <input type="text" id="targetAccount" placeholder="Enter the destination IBAN" maxlength="34" spellcheck="false" required>
+                        <input type="text" id="targetAccount" placeholder="Enter the recipient’s IBAN" maxlength="80" spellcheck="false" autocapitalize="characters" aria-describedby="targetAccountHelp targetAccountError" required>
+                        <small id="targetAccountHelp">Spaces and lowercase letters are accepted. Format checks do not verify the recipient’s account.</small>
+                        <small id="targetAccountError" class="form-error" hidden></small>
                     </div>
                     <div class="form-group">
                         <label for="transferAmount">Amount (€)</label>
-                        <input type="text" id="transferAmount" inputmode="decimal" placeholder="0.00" maxlength="256" aria-describedby="transferAmountHelp transferError" required>
+                        <input type="text" id="transferAmount" inputmode="decimal" placeholder="0.00" maxlength="256" aria-describedby="transferAmountHelp transferAmountError" required>
                         <small id="transferAmountHelp">Enter a positive amount with up to two decimal places.</small>
+                        <small id="transferAmountError" class="form-error" hidden></small>
                     </div>
                     <p id="transferError" class="form-error" role="alert" hidden></p>
-                    <button type="submit" class="btn btn-primary" id="btnTransfer" disabled>Send transfer</button>
+                    <button type="submit" class="btn btn-primary" id="btnTransfer" disabled>Review transfer</button>
                 </form>
+                <p id="transferLifecycle" class="transfer-lifecycle" role="status" aria-live="polite" tabindex="-1">Ready to submit</p>
                 <div class="transfer-recovery" id="transferRecovery" hidden>
                     <h3>Transfer activity</h3>
                     <label for="savedTransfer">Saved requests</label>
@@ -153,6 +158,7 @@
                 <div class="card-header">
                     <div><p class="eyebrow">Account activity</p><h2 id="historyTitle">Transaction History</h2></div>
                 </div>
+                <p id="historyNotice" class="account-status error" role="status" hidden></p>
                 <p class="mobile-table-help" id="tableHelp" hidden>Scroll horizontally to see all transaction details.</p>
                 <div class="table-wrapper" role="region" aria-label="Transaction history" aria-describedby="tableHelp" tabindex="0">
                     <table id="historyTable" class="banking-table is-empty">
@@ -171,9 +177,20 @@
                         </tbody>
                     </table>
                 </div>
+                <a id="historyTransferLink" class="btn btn-secondary empty-history-action" href="#transfers" hidden>Make a transfer</a>
             </section>
         </main>
     </div>
+    <dialog id="transferReview" class="help-dialog transfer-review" aria-labelledby="transferReviewTitle" aria-describedby="transferReviewNote">
+        <h2 id="transferReviewTitle">Review your transfer</h2>
+        <dl id="transferReviewDetails" class="review-details"></dl>
+        <p id="transferReviewNote">Check these details carefully. Your transfer is sent only when you confirm.</p>
+        <p id="transferBalanceWarning" class="balance-warning" hidden>This amount exceeds your last loaded balance. That balance is a snapshot; available funds will be checked when you confirm.</p>
+        <div class="review-actions">
+            <button id="editTransfer" class="btn btn-secondary" type="button" autofocus>Edit details</button>
+            <button id="confirmTransfer" class="btn btn-primary" type="button">Confirm transfer</button>
+        </div>
+    </dialog>
     <dialog id="transferHelp" class="help-dialog" aria-labelledby="transferHelpTitle" aria-describedby="transferHelpDescription">
         <h2 id="transferHelpTitle">Transfers and recovery</h2>
         <div id="transferHelpDescription">

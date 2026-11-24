@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"intermesh-ledger/internal/dto"
+	"intermesh-ledger/internal/iban"
 )
 
 type AccountRepository struct {
@@ -24,13 +25,16 @@ func (r *AccountRepository) CreateAccount(payload dto.AccountCreationPayloadDTO)
 	}
 
 	accountID := fmt.Sprintf("ACC-%d", nextSerial)
-	mockIBAN := fmt.Sprintf("IT99X030690500000010000%d", nextSerial)
+	demoIBAN, err := iban.Demo("IT", nextSerial)
+	if err != nil {
+		return account, err
+	}
 
 	query := `
 		INSERT INTO intermesh_accounts (account_id, user_id, iban, holder_name, balance, frozen_balance) 
 		VALUES ($1, $2, $3, $4, $5, 0.00)
 	`
-	_, err = r.db.Exec(query, accountID, payload.UserID, mockIBAN, payload.HolderName, payload.InitialDeposit)
+	_, err = r.db.Exec(query, accountID, payload.UserID, demoIBAN, payload.HolderName, payload.InitialDeposit)
 	if err != nil {
 		return account, err
 	}
@@ -38,7 +42,7 @@ func (r *AccountRepository) CreateAccount(payload dto.AccountCreationPayloadDTO)
 	account = dto.AccountDTO{
 		AccountID:     accountID,
 		UserID:        payload.UserID,
-		IBAN:          mockIBAN,
+		IBAN:          demoIBAN,
 		HolderName:    payload.HolderName,
 		Balance:       payload.InitialDeposit.Float64(),
 		FrozenBalance: 0.00,

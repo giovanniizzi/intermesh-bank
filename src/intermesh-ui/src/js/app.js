@@ -1,5 +1,6 @@
 import Keycloak from './libs/keycloak.js';
-import { TransferRequests, describeIntent, userScope } from './transfer-requests.js';
+import { TransferRequests, describeIntent, userScope, exactAmount } from './transfer-requests.js';
+import { validateIban, formatIban, italianIbanParts } from './iban.js';
 
 // --- MODULE-LEVEL VARIABLES ---
 const GATEWAY_URL = window.location.origin; 
@@ -20,12 +21,13 @@ let transferLoadError = false;
 let accountState = 'loading';
 let onboardingBusy = false;
 let historyLoaded = false;
+let transferReview = null;
 const appState = {
     view: 'dashboard', account: null, transactions: null, copyingIban: false,
     historyMessage: 'Load or open an account to view its transactions.'
 };
 const views = {
-    dashboard: { title: 'My Dashboard', subtitle: 'Welcome back. Your everyday banking, all in one place.' },
+    dashboard: { title: 'Dashboard', subtitle: 'Welcome back. Your everyday banking, all in one place.' },
     accountOverview: { title: 'My Account', subtitle: 'Your account details and balance snapshot.' },
     transfers: { title: 'Transfers', subtitle: 'Send a payment or check a saved transfer.' },
     transactions: { title: 'History', subtitle: 'Review your account activity and transfer statuses.' }
@@ -133,14 +135,14 @@ function renderAccountState(state, message) {
     renderDashboardAccount(state, status.textContent);
 }
 
-function accountBalancePanel(account) {
+function accountBalancePanel(account, noteText = 'Balance snapshot at account load. Reload to update.') {
     const balance = document.createElement('div');
     balance.className = 'account-balance';
     const label = textElement('span', 'Available balance');
     label.className = 'balance-label';
     const value = textElement('strong', formatMoney(account.balance));
     value.className = 'balance-value';
-    const note = textElement('p', 'Balance snapshot at account load. Reload to update.');
+    const note = textElement('p', noteText);
     note.className = 'balance-note';
     balance.append(label, value, note);
     return balance;
@@ -157,6 +159,12 @@ function renderDashboardAccount(state, message) {
     document.getElementById('dashboardAccountLink').textContent = state === 'empty' ? 'Open account' : 'View account';
     if (ready) {
         summary.append(accountBalancePanel(appState.account), textElement('p', `Account ${appState.account.account_id}`));
+        const iban = appState.account.iban.trim();
+        if (iban.length > 8) {
+            const abbreviatedIban = textElement('p', `IBAN ${iban.slice(0, 4)} … ${iban.slice(-4)}`);
+            abbreviatedIban.className = 'dashboard-iban';
+            summary.append(abbreviatedIban);
+        }
     }
     renderDashboardActivity();
 }
@@ -168,7 +176,9 @@ function renderDashboardActivity() {
     list.replaceChildren();
     list.hidden = recent.length === 0;
     status.hidden = recent.length > 0;
-    status.textContent = appState.account ? appState.historyMessage : 'Load or open an account to see recent activity.';
+    const empty = Array.isArray(appState.transactions) && appState.transactions.length === 0;
+    status.textContent = !appState.account ? 'Load or open an account to see recent activity.'
+        : empty ? 'No recent transactions yet. Make a transfer to see activity here.' : appState.historyMessage;
     for (const transaction of recent) {
         const item = document.createElement('li');
         const description = document.createElement('div');
@@ -186,6 +196,7 @@ function showAccount(account) {
         throw new Error('Account information is unavailable.');
     }
     appState.account = account;
+    document.getElementById('historyNotice').hidden = true;
     appState.transactions = null;
     activeAccountID = account.account_id;
     sourceAccountInput.value = activeAccountID;
@@ -194,12 +205,16 @@ function showAccount(account) {
     details.className = 'account-details';
     for (const [title, text] of [['Account number', activeAccountID], ['IBAN', account.iban]]) {
         const item = document.createElement('div');
-        const description = textElement('dd', text);
-        if (title === 'IBAN') description.className = 'iban';
+        const description = textElement('dd', title === 'IBAN' ? formatIban(text) : text);
+        if (title === 'IBAN') {
+            description.className = 'iban';
+            const parts = italianIbanParts(text);
+            if (parts) description.setAttribute('aria-label', parts.map(([label, value]) => `${label}: ${value}`).join(', '));
+        }
         item.append(textElement('dt', title), description);
         details.append(item);
     }
-    onboardingTarget.replaceChildren(accountBalancePanel(account), details);
+    onboardingTarget.replaceChildren(accountBalancePanel(account, 'Your balance when this account was loaded. Reload to see an updated snapshot.'), details);
     renderAccountState('ready');
     historyLoaded = false;
     renderHistoryMessage('Loading transactions…');
@@ -308,14 +323,23 @@ async function fetchLedgerHistory(accountId) {
         if (!response.ok) throw new Error('History unavailable');
 
         const transactions = await response.json();
+        if (transactions !== null && !Array.isArray(transactions)) throw new Error('History unavailable');
         if (isCurrentRequest(context) && accountId === activeAccountID) {
             renderHistoryTable(transactions);
+            document.getElementById('historyNotice').hidden = true;
             historyLoaded = true;
         }
     } catch {
-        if (isCurrentRequest(context) && accountId === activeAccountID && !historyLoaded) {
-            renderHistoryMessage(authenticationBlocked ? 'Sign in again to load transaction history.'
+        if (isCurrentRequest(context) && accountId === activeAccountID) {
+            if (!historyLoaded) renderHistoryMessage(authenticationBlocked ? 'Sign in again to load transaction history.'
                 : 'Transaction history is unavailable. We’ll check again on the next update.');
+            else {
+                const notice = document.getElementById('historyNotice');
+                notice.textContent = authenticationBlocked ? 'Sign in again to update transaction history.'
+                    : 'We couldn’t update your history. Showing the last available transactions.';
+                notice.hidden = false;
+                document.getElementById('historyTransferLink').hidden = true;
+            }
         }
     } finally {
         if (historyRequest === context) historyRequest = null;
@@ -330,6 +354,7 @@ function setupNavigation() {
         appState.view = selected;
         const help = document.getElementById('transferHelp');
         if (selected !== 'transfers' && help.open) help.close();
+        if (selected !== 'transfers') closeTransferReview();
         for (const id of Object.keys(views)) document.getElementById(id).hidden = id !== selected;
         document.getElementById('pageTitle').textContent = views[selected].title;
         document.getElementById('pageSubtitle').textContent = views[selected].subtitle;
@@ -367,6 +392,26 @@ function setupEventListeners() {
     });
     setupNavigation();
     document.getElementById('copyIban').addEventListener('click', copyIban);
+    const reviewDialog = document.getElementById('transferReview');
+    document.getElementById('editTransfer').addEventListener('click', closeTransferReview);
+    reviewDialog.addEventListener('close', () => {
+        if (reviewDialog.open) return;
+        closeTransferReview();
+        if (appState.view === 'transfers' && !authenticationBlocked) {
+            document.getElementById(transferRequests?.active ? 'transferLifecycle' : 'btnTransfer').focus({ preventScroll: true });
+        }
+    });
+    document.getElementById('confirmTransfer').addEventListener('click', () => {
+        const review = transferReview;
+        if (!review || !reviewDialog.open || !isCurrentRequest(review.context) || authenticationBlocked
+                || transferRequests?.busy || transferRequests?.active) return;
+        closeTransferReview();
+        runTransferAction(async requests => {
+            const intent = requests.create(review.payload);
+            await requests.send(intent.transfer_request_id);
+        });
+        document.getElementById('transferLifecycle').focus({ preventScroll: true });
+    });
     document.getElementById('retryAccount').addEventListener('click', () => {
         const userID = keycloak.tokenParsed?.preferred_username;
         if (!authenticationBlocked && userID) checkExistingAccount(userID);
@@ -374,11 +419,16 @@ function setupEventListeners() {
     for (const id of ['sourceAccount', 'targetAccount', 'transferAmount']) {
         document.getElementById(id).addEventListener('input', () => {
             document.getElementById(id).removeAttribute('aria-invalid');
+            document.getElementById(id + 'Error').hidden = true;
+            closeTransferReview();
             showTransferError('');
         });
     }
     transferForm.addEventListener('invalid', event => {
         event.target.setAttribute('aria-invalid', 'true');
+        const error = document.getElementById(event.target.getAttribute('id') + 'Error');
+        error.textContent = event.target.validationMessage;
+        error.hidden = false;
         showTransferError(event.target.validationMessage);
     }, true);
 
@@ -442,13 +492,9 @@ function setupEventListeners() {
 
     transferForm.addEventListener('submit', (event) => {
         event.preventDefault();
-        if (!transferRequests || transferRequests.busy || transferRequests.active) return;
-        runTransferAction(async requests => {
-            const intent = requests.create({ source_account: sourceAccountInput.value,
-                target_account: document.getElementById('targetAccount').value,
-                amount: document.getElementById('transferAmount').value });
-            await requests.send(intent.transfer_request_id);
-        });
+        if (!transferRequests || !transferRequests.isCurrent() || transferRequests.busy || transferRequests.active
+                || authenticationBlocked || transferRequests.storageFailed || transferReview) return;
+        reviewTransfer();
     });
     document.getElementById('savedTransfer').addEventListener('change', event => {
         runTransferAction(requests => requests.select(event.target.value || null));
@@ -499,6 +545,7 @@ function isCurrentRequest(context) {
 function pauseAuthenticatedRequests() {
     if (authenticationBlocked) return;
     authenticationBlocked = true;
+    closeTransferReview();
     stopLedgerPolling();
     if (sourceAccountInput) {
         document.getElementById('btnOnboard').disabled = true;
@@ -568,6 +615,7 @@ function initializeTransfers() {
 
 function suspendTransferView() {
     authenticationGeneration++;
+    closeTransferReview();
     transferRequests?.detach();
     transferRequests = null;
     transferLoadError = false;
@@ -585,6 +633,7 @@ function suspendTransferView() {
     onboardingTarget.textContent = '';
     onboardingTarget.classList.add('hidden');
     document.getElementById('ibanCopyStatus').textContent = '';
+    document.getElementById('historyNotice').hidden = true;
     renderAccountState('signed-out');
     document.getElementById('onboardingError').hidden = true;
     showTransferError('');
@@ -642,7 +691,15 @@ function renderTransferState() {
         document.getElementById('transferAmount').value = active.amount;
     }
     document.getElementById('btnTransfer').disabled = !requests || unavailable || Boolean(active) || requests.storageFailed;
-    document.getElementById('btnTransfer').textContent = busy ? 'Processing…' : 'Send transfer';
+    document.getElementById('btnTransfer').textContent = busy ? 'Processing…' : 'Review transfer';
+    const lifecycle = document.getElementById('transferLifecycle');
+    lifecycle.textContent = busy ? 'Processing — please wait. Do not submit another transfer.'
+        : authenticationBlocked || transferLoadError || requests?.storageFailed ? 'Temporarily unavailable — no new transfer will be sent.'
+        : active?.notice === 'TRANSFER_PERSISTENCE_UNAVAILABLE' ? 'Temporarily unavailable — the latest financial outcome is not confirmed. Check status before sending again.'
+        : active?.notice === 'COMMIT_OUTCOME_UNKNOWN' || active?.outcome === 'UNRESOLVED' ? 'Outcome unknown — check status before sending another payment.'
+        : ({ APPROVED: 'Completed', PENDING: 'Pending — this transfer is not completed.',
+            FAILED: 'Reported failed', REJECTED: 'Request rejected' }[active?.outcome] || 'Ready to submit');
+    lifecycle.className = 'transfer-lifecycle' + (lifecycle.textContent === 'Completed' ? ' completed' : '');
     document.getElementById('transferForm').setAttribute('aria-busy', String(busy));
     document.getElementById('checkTransfer').disabled = !active || unavailable;
     document.getElementById('replayTransfer').disabled = !active || unavailable || requests?.storageFailed
@@ -679,6 +736,71 @@ function textElement(tag, text) {
     return element;
 }
 
+function closeTransferReview() {
+    transferReview = null;
+    const dialog = document.getElementById('transferReview');
+    document.getElementById('transferReviewDetails').replaceChildren();
+    document.getElementById('transferBalanceWarning').hidden = true;
+    if (dialog.open) dialog.close();
+}
+
+function transferMoney(amount) {
+    const [whole, fraction] = amount.split('.');
+    return '€' + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + fraction;
+}
+
+function reviewTransfer() {
+    const payload = {};
+    let invalid = null;
+    showTransferError('');
+    for (const [id, key, validate] of [
+        ['sourceAccount', 'source_account', value => {
+            if (!value || [...value].length > 50 || /[\s\u0000-\u001f\u007f-\u009f]/.test(value)) {
+                throw new Error('Enter a valid source account number.');
+            }
+            return value;
+        }],
+        ['targetAccount', 'target_account', validateIban],
+        ['transferAmount', 'amount', value => {
+            if (!/^[0-9]+(?:\.[0-9]{1,2})?$/.test(value.trim())) {
+                throw new Error('Enter a positive amount with up to two decimal places, using a decimal point.');
+            }
+            return exactAmount(value.trim());
+        }]
+    ]) {
+        const field = document.getElementById(id);
+        const error = document.getElementById(id + 'Error');
+        field.removeAttribute('aria-invalid');
+        error.hidden = true;
+        try { payload[key] = validate(field.value); }
+        catch (failure) {
+            field.setAttribute('aria-invalid', 'true');
+            error.textContent = failure.message;
+            error.hidden = false;
+            if (!invalid) {
+                invalid = field;
+                showTransferError(failure.message);
+            }
+        }
+    }
+    if (invalid) { invalid.focus(); return; }
+    document.getElementById('targetAccount').value = payload.target_account;
+    const details = document.getElementById('transferReviewDetails');
+    details.replaceChildren();
+    for (const [label, value] of [['From account', payload.source_account],
+        ['Recipient IBAN', formatIban(payload.target_account)], ['Amount', transferMoney(payload.amount)]]) {
+        const item = document.createElement('div');
+        item.append(textElement('dt', label), textElement('dd', value));
+        details.append(item);
+    }
+    // A loaded balance is a snapshot; only the backend can authorize available funds.
+    const account = appState.account;
+    document.getElementById('transferBalanceWarning').hidden = !account
+        || account.account_id !== payload.source_account || Number(payload.amount) <= account.balance;
+    transferReview = { payload: Object.freeze(payload), context: requestContext() };
+    document.getElementById('transferReview').showModal();
+}
+
 function showTransferError(message) {
     const error = document.getElementById('transferError');
     error.textContent = message;
@@ -701,6 +823,7 @@ function renderHistoryMessage(message) {
     appState.historyMessage = message;
     document.getElementById('historyTable').classList.add('is-empty');
     document.getElementById('tableHelp').hidden = true;
+    document.getElementById('historyTransferLink').hidden = message !== 'No transactions found for this account.' || !activeAccountID;
     const row = document.createElement('tr');
     const cell = textElement('td', message);
     cell.colSpan = 5;
@@ -719,10 +842,11 @@ function renderHistoryTable(transactions) {
         return;
     }
     document.getElementById('historyTable').classList.remove('is-empty');
+    document.getElementById('historyTransferLink').hidden = true;
     document.getElementById('tableHelp').hidden = false;
     for (const tx of transactions) {
         const row = document.createElement('tr');
-        const fields = [['strong', tx.transaction_id], ['code', tx.target_iban],
+        const fields = [['strong', tx.transaction_id], ['code', formatIban(tx.target_iban)],
             ['strong', formatMoney(tx.amount)], ['span', tx.status], ['small', formatTimestamp(tx.timestamp)]];
         for (const [index, [tag, text]] of fields.entries()) {
             const cell = document.createElement('td');

@@ -224,8 +224,9 @@ The [SQL sources](../applications/prerequisites/dependencies/postgresql) define
 accounts, transactions and transfer requests with `NUMERIC(15,2)` amounts. The
 repository does not pin a PostgreSQL server major version; the configured database
 must support the schema, transactional row/advisory locking and required privileges.
-Provision the schema through an appropriate database procedure. Do not reapply
-demo seed data to an existing database without verifying its current state.
+Initialize with `001.sql`, `002.sql` and `003-transfer-requests.sql`, in that order.
+The demo data is disposable; use the [database reset procedure](../applications/prerequisites/dependencies/postgresql/README.md#reinitializing-the-demo)
+to replace it while preserving database infrastructure and roles.
 See [credential provisioning](examples/README.md#shared-postgresql-database).
 
 ### Keycloak

@@ -131,9 +131,10 @@ and `JSESSIONID` when replacing environment inputs.
 
 - **PostgreSQL:** prepare the schema represented by [accounts](../applications/prerequisites/dependencies/postgresql/001.sql),
   [transactions](../applications/prerequisites/dependencies/postgresql/002.sql) and [transfer requests](../applications/prerequisites/dependencies/postgresql/003-transfer-requests.sql)
-  through an approved database procedure. Verify schema/search-path compatibility,
-  database TLS and network access. Do not blindly rerun fixtures on an existing
-  database. Each managed cluster needs `intermesh-backend/intermesh-ledger-db`,
+  in that order through an approved database procedure. Follow the
+  [initialization and reset instructions](../applications/prerequisites/dependencies/postgresql/README.md)
+  when replacing disposable demo data. Verify schema/search-path compatibility,
+  database TLS and network access. Each managed cluster needs `intermesh-backend/intermesh-ledger-db`,
   key `DATABASE_URL`, pointing to the same database. Use the
   [secure from-file procedure](examples/README.md#create-the-secret-without-putting-credentials-in-command-arguments);
   never pass a connection string in command arguments or print Secret contents.

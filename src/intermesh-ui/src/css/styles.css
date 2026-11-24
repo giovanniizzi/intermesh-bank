@@ -60,9 +60,12 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .section-description { color: var(--text-muted); font-size: 13px; margin: -10px 0 24px; }
 .detail-view { max-width: 760px; }
 .text-link { font-size: 12px; font-weight: 600; text-underline-offset: 4px; padding: 12px 0; }
+#dashboard .text-link { font-size: 13px; text-decoration-thickness: 1.5px; }
+#dashboard .text-link:hover, #dashboard .text-link:focus-visible { color: var(--primary-hover); text-decoration-thickness: 2px; }
+#dashboard .dashboard-iban { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
 .quick-actions { display: grid; gap: 14px; }
 .quick-action { position: relative; display: grid; gap: 6px; padding: 18px 44px 18px 18px; border: 1px solid var(--border-color); border-radius: 12px; color: var(--text-main); text-decoration: none; }
-.quick-action:hover { background: #f5f7fb; border-color: #a8bee3; }
+#dashboard .quick-action:hover, #dashboard .quick-action:focus-visible { background: #f5f7fb; border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
 .quick-action > span:first-child { font-weight: 600; font-size: 14px; }
 .quick-action small { color: var(--text-muted); font-size: 12px; }
 .quick-action > span:last-child { position: absolute; right: 18px; top: 20px; color: var(--primary); }
@@ -125,7 +128,19 @@ h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .help-dialog p { margin-top: 16px; color: var(--text-muted); font-size: 14px; line-height: 1.7; }
 .help-dialog .btn { width: 100%; margin-top: 24px; }
 
+/* Transfer review */
+.transfer-review { width: min(480px, calc(100% - 32px)); }
+.review-details { display: grid; gap: 18px; margin-top: 24px; }
+.review-details dt { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+.review-details dd { margin: 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.review-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.review-actions .btn { flex: 1; margin-top: 0; white-space: nowrap; }
+.balance-warning { padding: 12px; background: #fff7e8; border-radius: 8px; }
+.transfer-lifecycle { margin-top: 16px; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.transfer-lifecycle.completed { color: #176443; font-weight: 600; }
+
 /* Transaction history */
+.empty-history-action { display: inline-flex; align-items: center; margin: 16px 0; text-decoration: none; }
 .table-card { grid-column: 1 / -1; padding-bottom: 12px; }
 .table-wrapper { overflow-x: auto; border-radius: 8px; }
 .banking-table { width: 100%; min-width: 680px; border-collapse: collapse; text-align: left; font-size: 12px; }
